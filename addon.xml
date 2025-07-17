@@ -1,0 +1,228 @@
+<?xml version="1.0"?>
+<addon scheme="3.0" edition_type="ROOT,ULT:VENDOR">
+    <!-- Идентификатор аддона; должен быть равен имени каталога -->
+    <id>pim_sync</id>
+    <!-- Наименования -->
+    <name>Uroven PIM Sync</name>
+    <!-- Версия аддона -->
+    <version>1.0.1</version>
+    <!-- Автор аддона -->
+    <authors>
+    <author>
+    <name>Andrej Spinej</name>
+    <supplier>Andrej Spinej</supplier>
+    </author>
+    </authors>
+    <!-- Описание аддона -->
+    <description>Аддон для синхронизации каталога товаров с системой Compo PIM через REST API CS-Cart. Обеспечивает автоматическую и ручную синхронизацию категорий и товаров.</description>
+    <!-- Родной язык аддона (по умолчанию) -->
+    <default_language>ru</default_language>
+    <authors>
+    <author>
+    <name>Andrej Spinej</name>
+    </author>
+    </authors>
+    <supplier>Andrej Spinej</supplier>
+    <!-- Приоритет аддона. Чем выше, тем позже аддон подключается -->
+    <priority>100</priority>
+    <!-- Статус, который будет выставлен после установки аддона -->
+    <status>active</status>
+    <!-- Определяет, в каких редакциях аддон будет установлен по умолчанию -->
+    <auto_install>ULTIMATE,MULTIVENDOR</auto_install>
+    
+    <!-- Блок для описания совместимостей с другими аддонами -->
+    <compatibility>
+        <!-- Зависимости. Эти аддоны должны быть установлены -->
+        <dependencies></dependencies>
+        <!-- Конфликты. Эти аддоны будут автоматически выключены -->
+        <conflicts></conflicts>
+    </compatibility>
+    
+    <!-- Блок настроек аддона -->
+    <settings layout="separate" edition_type="ROOT,ULT:VENDOR">
+        <!-- Список вкладок на странице настроек аддона -->
+        <sections>
+            <!-- Основные настройки -->
+            <section id="general">
+                <items>
+                    <!-- Заголовок секции -->
+                    <item id="api_settings_header">
+                        <type>header</type>
+                        <variants/>
+                    </item>
+                    <!-- URL API -->
+                    <item id="api_url">
+                        <type>input</type>
+                        <default_value>https://pim.uroven.pro/api/v1/</default_value>
+                        <variants/>
+                    </item>
+                    <!-- Логин API -->
+                    <item id="api_login">
+                        <type>input</type>
+                        <default_value>s.andrey</default_value>
+                        <variants/>
+                    </item>
+                    <!-- Пароль API -->
+                    <item id="api_password">
+                        <type>password</type>
+                        <default_value>KZh-4g2-YFx-Jgm</default_value>
+                        <variants/>
+                    </item>
+                    <!-- ID каталога -->
+                    <item id="catalog_id">
+                        <type>input</type>
+                        <default_value>21</default_value>
+                        <variants/>
+                    </item>
+                </items>
+            </section>
+            
+            <!-- Настройки CS-Cart API -->
+            <section id="cs_cart_api_settings">
+                <items>
+                    <!-- Заголовок секции -->
+                    <item id="sync_cscart_api">
+                        <type>header</type>
+                        <variants/>
+                    </item>
+                    <!-- URL CS-Cart API -->
+                    <item id="cs_cart_api_url">
+                        <type>input</type>
+                        <default_value>https://uroven.local</default_value>
+                        <variants/>
+                    </item>
+                    <!-- Email пользователя CS-Cart -->
+                    <item id="cs_cart_email">
+                        <type>input</type>
+                        <default_value>enjoy_hill@mail.ru</default_value>
+                        <variants/>
+                    </item>
+                    <!-- API Key пользователя CS-Cart -->
+                    <item id="cs_cart_api_key">
+                        <type>password</type>
+                        <default_value>S9p87K3yM1gcp117K20fHBrL04Jr3V92</default_value>
+                        <variants/>
+                    </item>
+                </items>
+            </section>
+            
+            <!-- Настройки синхронизации -->
+            <section id="sync_settings">
+                <items>
+                    <!-- Заголовок секции -->
+                    <item id="sync_settings_header">
+                        <type>header</type>
+                        <variants/>
+                    </item>
+                    <!-- Включить автоматическую синхронизацию -->
+                    <item id="sync_enabled">
+                        <type>checkbox</type>
+                        <default_value>N</default_value>
+                        <variants/>
+                    </item>
+                    <!-- Интервал синхронизации -->
+                    <item id="sync_interval">
+                        <type>input</type>
+                        <default_value>30</default_value>
+                        <variants/>
+                    </item>
+                    <!-- Тип синхронизации по умолчанию -->
+                    <item id="default_sync_type">
+                        <type>selectbox</type>
+                        <default_value>delta</default_value>
+                        <variants>
+                            <item id="full"></item>
+                            <item id="delta"></item>
+                        </variants>
+                    </item>
+                </items>
+            </section>
+            
+            <!-- Дополнительные настройки -->
+            <section id="advanced_settings">
+                <items>
+                    <!-- Заголовок секции -->
+                    <item id="advanced_settings_header">
+                        <type>header</type>
+                        <variants/>
+                    </item>
+                    <!-- Логирование -->
+                    <item id="enable_logging">
+                        <type>checkbox</type>
+                        <default_value>Y</default_value>
+                        <variants/>
+                    </item>
+                    <!-- Уровень логирования -->
+                    <item id="log_level">
+                        <type>selectbox</type>
+                        <default_value>info</default_value>
+                        <variants>
+                            <item id="debug"></item>
+                            <item id="info"></item>
+                            <item id="warning"></item>
+                            <item id="error"></item>
+                        </variants>
+                    </item>
+                    <!-- Timeout для API запросов -->
+                    <item id="api_timeout">
+                        <type>input</type>
+                        <default_value>30</default_value>
+                        <variants/>
+                    </item>
+                    <!-- Информация о статусе -->
+                    <item id="connection_status">
+                        <type>info</type>
+                        <handler>fn_pim_sync_connection_status</handler>
+                        <variants/>
+                    </item>
+                </items>
+            </section>
+        </sections>
+    </settings>
+
+    <!-- Дополнительные запросы к базе данных -->
+    <queries>
+        <!-- Создание таблицы логов синхронизации -->
+        <item for="install">
+            CREATE TABLE IF NOT EXISTS `?:pim_sync_log` (
+                `log_id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+                `sync_type` enum('full','delta','manual','test_connection','categories','products','features') NOT NULL,
+                `started_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `completed_at` timestamp NULL DEFAULT NULL,
+                `status` enum('running','completed','failed') DEFAULT 'running',
+                `affected_categories` int(11) unsigned DEFAULT '0',
+                `affected_products` int(11) unsigned DEFAULT '0',
+                `affected_features` int(11) unsigned DEFAULT '0',
+                `error_details` text,
+                `company_id` int(11) unsigned NOT NULL DEFAULT '0',
+                PRIMARY KEY (`log_id`),
+                KEY `company_id` (`company_id`),
+                KEY `status` (`status`),
+                KEY `sync_type` (`sync_type`),
+                KEY `started_at` (`started_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+        </item>
+        
+
+        
+        <!-- Добавление привилегий -->
+        <item for="install">
+            INSERT IGNORE INTO `?:privileges` (`privilege`, `is_default`, `section_id`, `group_id`, `is_view`) 
+            VALUES ('manage_pim_sync', 'Y', 'catalog', 'catalog', 'N')
+        </item>
+        
+        <!-- Удаление таблиц при удалении -->
+        <item for="uninstall">DROP TABLE IF EXISTS `?:pim_sync_log`</item>
+        
+        <!-- Удаление привилегий при удалении -->
+        <item for="uninstall">DELETE FROM `?:privileges` WHERE `privilege` = 'manage_pim_sync'</item>
+    </queries>
+    
+    <!-- Пользовательские функции, вызывающиеся при наступлении определённых событий -->
+    <functions>
+        <!-- Функции установки -->
+        <item for="install">fn_pim_sync_install</item>
+        <!-- Функции удаления -->
+        <item for="uninstall">fn_pim_sync_uninstall</item>
+    </functions>
+</addon>
