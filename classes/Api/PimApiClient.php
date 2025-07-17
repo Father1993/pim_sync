@@ -56,12 +56,12 @@ class PimApiClient extends BaseApiClient
      *
      * @param string $endpoint
      * @param string $method
-     * @param mixed $data
+     * @param array|null $data
      * @param bool $use_auth Использовать ли авторизацию
      * @return array Ответ от API
      * @throws Exception
      */
-    public function makeRequest($endpoint, $method = 'GET', $data = null, $use_auth = true)
+    public function makeRequest(string $endpoint, string $method = 'GET', ?array $data = null, bool $use_auth = true): array
     {
         // Проверяем необходимость авторизации
         if ($use_auth && (!$this->token || time() >= $this->token_expires)) {

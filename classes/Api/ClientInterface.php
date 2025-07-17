@@ -1,4 +1,11 @@
 <?php
+/**
+ * PIM Sync
+ *
+ * @package Tygh\Addons\PimSync\
+ * @author Andrej Spinej
+ * @copyright (c) 2025, Уровень
+ */
 namespace Tygh\Addons\PimSync\Api;
 /**
  * Интерфейс для API клиентов

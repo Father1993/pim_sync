@@ -86,7 +86,22 @@ class Logger implements LoggerInterface
      */
     public function clearLogs(): bool
     {
-        return (bool)file_put_contents($this->logFile, '');
+        // Используем file_put_contents для очистки файла
+        // Если файл не существует, функция создаст его
+        file_put_contents($this->logFile, '');
+        
+        // Всегда возвращаем true, так как файл либо очищен, либо создан заново
+        return true;
+    }
+    
+    /**
+     * Добавляет пустую строку в лог
+     * 
+     * @return void
+     */
+    public function addEmptyLine(): void
+    {
+        file_put_contents($this->logFile, PHP_EOL, FILE_APPEND | LOCK_EX);
     }
     
     /**

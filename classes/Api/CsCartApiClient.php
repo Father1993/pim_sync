@@ -38,7 +38,7 @@ class CsCartApiClient extends BaseApiClient
      *
      * @return bool
      */
-    public function testConnection()
+    public function testConnection(): bool
     {
         try {
             $response = $this->makeRequest('/api/2.0/version', 'GET');

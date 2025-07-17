@@ -11,7 +11,11 @@ if (!defined('BOOTSTRAP')) {
   die('Access denied');
 }
 
+// Явное подключение интерфейса
+require_once __DIR__ . '/classes/Utils/LoggerInterface.php';
+
 use Tygh\Addons\PimSync\Utils\Logger;
+use Tygh\Addons\PimSync\Utils\LoggerInterface;
 
 /**
  * Возвращает экземпляр логгера (реализация шаблона Singleton)
@@ -23,7 +27,26 @@ function fn_pim_sync_get_logger()
     static $logger = null;
     
     if ($logger === null) {
-        $logger = new Logger();
+        // Проверяем существование класса Logger перед использованием
+        if (class_exists('\Tygh\Addons\PimSync\Utils\Logger')) {
+            $logger = new \Tygh\Addons\PimSync\Utils\Logger();
+        } else {
+            // Fallback для случаев, когда класс Logger недоступен (например, при удалении аддона)
+            // или во время инициализации настроек
+            $logger = new class() implements \Tygh\Addons\PimSync\Utils\LoggerInterface {
+                public function log(string $message, string $level = 'info'): void {
+                    if ($level === 'error' || $level === 'critical') {
+                        fn_log_event('pim_sync', $level, ['message' => $message]);
+                    }
+                }
+                public function getRecentLogs(int $limit = 50, ?string $level = null): array { 
+                    return []; 
+                }
+                public function clearLogs(): bool { 
+                    return true; 
+                }
+            };
+        }
     }
     
     return $logger;
@@ -59,4 +82,14 @@ function fn_pim_sync_get_recent_logs($limit = 50, $level = null)
 function fn_pim_sync_clear_logs()
 {
     return fn_pim_sync_get_logger()->clearLogs();
+}
+
+/**
+ * Добавляет пустую строку в файл лога для улучшения читаемости
+ * 
+ * @return void
+ */
+function fn_pim_sync_log_empty_line()
+{
+    fn_pim_sync_get_logger()->addEmptyLine();
 }

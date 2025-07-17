@@ -11,34 +11,80 @@ if (!defined('BOOTSTRAP')) {
     die('Access denied');
 }
 
+// Включаем отладку для поиска ошибок
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
+
+// Защитное логирование
+fn_log_event('pim_sync', 'debug', ['message' => 'Запуск контроллера pim_sync.php, mode: ' . $mode]);
+
+// Принудительная загрузка классов
+fn_pim_sync_autoload_classes();
+
+// Подключаем файл с функциями обработки POST запросов
+require_once __DIR__ . '/pim_sync_post.php';
+
 use Tygh\Registry;
 use Tygh\Addons\PimSync\Api\PimApiClient;
 use Tygh\Addons\PimSync\Exception\ApiAuthException;
 
 $mode = !empty($_REQUEST['mode']) ? $_REQUEST['mode'] : 'manage';
 
-// Обработка POST запросов
+// ТОЛЬКО обработка POST запросов
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    require_once __DIR__ . '/pim_sync_post.php';
-    exit;
+    // Флаг, указывающий, что мы обрабатываем POST запрос
+    $is_post_request = true;
+    
+    fn_log_event('pim_sync', 'debug', ['message' => 'Обработка POST запроса, mode: ' . $mode]);
+} else {
+    // GET запрос - просто отображение страницы
+    $is_post_request = false;
 }
 
 // Определение действия и вызов соответствующего обработчика
 switch ($mode) {
     case 'test_connection':
-        fn_pim_sync_controller_test_connection();
+        if ($is_post_request) {
+            // Обработка POST для теста соединения
+            fn_pim_sync_process_test_connection();
+            return [CONTROLLER_STATUS_OK, 'pim_sync.test_connection'];
+        } else {
+            // Просто отображение страницы теста
+            fn_pim_sync_controller_test_connection();
+        }
         break;
         
     case 'sync_full':
-        fn_pim_sync_controller_sync_full();
+        if ($is_post_request) {
+            // Обработка POST для полной синхронизации
+            fn_pim_sync_process_sync_full();
+            return [CONTROLLER_STATUS_OK, 'pim_sync.manage'];
+        } else {
+            // Просто отображение страницы полной синхронизации
+            fn_pim_sync_controller_sync_full();
+        }
         break;
         
     case 'sync_delta':
-        fn_pim_sync_controller_sync_delta();
+        if ($is_post_request) {
+            // Обработка POST для дельта синхронизации
+            fn_pim_sync_process_sync_delta();
+            return [CONTROLLER_STATUS_OK, 'pim_sync.manage'];
+        } else {
+            // Просто отображение страницы дельта синхронизации
+            fn_pim_sync_controller_sync_delta();
+        }
         break;
         
     case 'clear_logs':
-        fn_pim_sync_controller_clear_logs();
+        if ($is_post_request) {
+            // Обработка POST для очистки логов
+            $result = fn_pim_sync_process_clear_logs();
+            return $result;
+        } else {
+            // Просто отображение страницы очистки логов
+            fn_pim_sync_controller_clear_logs();
+        }
         break;
         
     case 'manage':

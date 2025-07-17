@@ -16,6 +16,7 @@ require_once(dirname(__FILE__) . '/logger.php');
 
 use Tygh\Addons\PimSync\Api\PimApiClient;
 use Tygh\Addons\PimSync\Api\CsCartApiClient;
+use Tygh\Addons\PimSync\PimSyncService;
 use Tygh\Registry;
 
 /**
@@ -32,7 +33,8 @@ function fn_pim_sync_install()
  */
 function fn_pim_sync_uninstall()
 {
-    fn_pim_sync_log('PIM Sync addon uninstalled', 'info');
+    // Прямая запись в системный лог CS-Cart без использования классов аддона
+    fn_log_event('pim_sync', 'info', ['message' => 'PIM Sync addon uninstalled']);
     return true;
 }
 
@@ -104,24 +106,31 @@ function fn_pim_sync_connection_status()
     $status_html .= '</div>';
     
     // Информация о последней синхронизации (получаем из логов)
-    $recent_logs = fn_pim_sync_get_recent_logs(10);
-    $sync_logs = array_filter($recent_logs, function($log) {
-        return strpos($log['message'], 'НАЧАЛО') !== false && 
-               (strpos($log['message'], 'СИНХРОНИЗАЦИИ') !== false);
-    });
-    
-    if (!empty($sync_logs)) {
-        $last_log = reset($sync_logs);
-        $status_html .= '<div class="alert alert-info">';
-        $status_html .= '<strong>' . __('pim_sync.last_sync_info') . '</strong><br>';
-        $status_html .= __('pim_sync.started_at') . ': ' . $last_log['timestamp'] . '<br>';
+    try {
+        $recent_logs = fn_pim_sync_get_recent_logs(10);
+        $sync_logs = array_filter($recent_logs, function($log) {
+            return strpos($log['message'], 'НАЧАЛО') !== false && 
+                (strpos($log['message'], 'СИНХРОНИЗАЦИИ') !== false);
+        });
         
-        // Определяем тип синхронизации по сообщению
-        $sync_type = (strpos($last_log['message'], 'ПОЛНОЙ') !== false) ? 'full' : 'delta';
-        $status_html .= __('pim_sync.sync_type') . ': ' . __('pim_sync.sync_type_' . $sync_type);
-        
-        $status_html .= '</div>';
-    } else {
+        if (!empty($sync_logs)) {
+            $last_log = reset($sync_logs);
+            $status_html .= '<div class="alert alert-info">';
+            $status_html .= '<strong>' . __('pim_sync.last_sync_info') . '</strong><br>';
+            $status_html .= __('pim_sync.started_at') . ': ' . $last_log['timestamp'] . '<br>';
+            
+            // Определяем тип синхронизации по сообщению
+            $sync_type = (strpos($last_log['message'], 'ПОЛНОЙ') !== false) ? 'full' : 'delta';
+            $status_html .= __('pim_sync.sync_type') . ': ' . __('pim_sync.sync_type_' . $sync_type);
+            
+            $status_html .= '</div>';
+        } else {
+            $status_html .= '<div class="alert alert-info">';
+            $status_html .= __('pim_sync.no_sync_history');
+            $status_html .= '</div>';
+        }
+    } catch (Exception $e) {
+        // В случае ошибки с получением логов просто не показываем историю
         $status_html .= '<div class="alert alert-info">';
         $status_html .= __('pim_sync.no_sync_history');
         $status_html .= '</div>';

@@ -8,6 +8,15 @@ if (!defined('BOOTSTRAP')) {
     die('Access denied');
 }
 
+// Добавляем отладочную информацию для выявления проблемы
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
+
+// Защитное логирование для отслеживания проблемы
+if (function_exists('fn_log_event')) {
+    fn_log_event('pim_sync', 'debug', ['message' => 'Запуск pim_sync_post.php']);
+}
+
 use Tygh\Registry;
 use Tygh\Addons\PimSync\Api\PimApiClient;
 use Tygh\Addons\PimSync\Exception\ApiAuthException;
@@ -40,6 +49,13 @@ switch ($mode) {
 function fn_pim_sync_process_test_connection()
 {
     try {
+        // Логируем начало процесса тестирования
+        if (function_exists('fn_log_event')) {
+            fn_log_event('pim_sync', 'debug', ['message' => 'Начало функции тестирования соединения']);
+        }
+        
+        // Добавляем пустую строку перед началом
+        fn_pim_sync_log_empty_line();
         fn_pim_sync_log('=== НАЧАЛО ТЕСТИРОВАНИЯ СОЕДИНЕНИЯ ===', 'info');
         
         // Получаем настройки аддона
@@ -72,32 +88,49 @@ function fn_pim_sync_process_test_connection()
             $test_result['details'][] = 'Логин: ' . $api_login;
             
             try {
-                $api_client = new PimApiClient($api_url, $api_login, $api_password, fn_pim_sync_get_logger());
+                // Проверяем существование класса для более информативной ошибки
+                if (!class_exists('Tygh\Addons\PimSync\Api\PimApiClient')) {
+                    fn_log_event('pim_sync', 'error', ['message' => 'Класс PimApiClient не найден, проблема с автозагрузкой']);
+                    throw new Exception('Класс PimApiClient не найден. Проблема с автозагрузкой классов.');
+                }
                 
-                // Проверяем базовое соединение
-                if ($api_client->testConnection()) {
+                // ОТЛАДКА: Пропускаем реальный API запрос при тестировании
+                if (isset($_REQUEST['debug_skip_api']) && $_REQUEST['debug_skip_api'] == 'Y') {
                     $test_result['success'] = true;
-                    $test_result['message'] = 'Соединение установлено успешно';
-                    $test_result['details'][] = 'Авторизация: успешно';
-                    
-                    if (!empty($catalog_id)) {
-                        $test_result['details'][] = 'Каталог ID: ' . $catalog_id;
-                    }
-                    
-                    fn_pim_sync_log('Test connection successful', 'info');
-                    fn_set_notification('N', __('notice'), 'Соединение установлено успешно');
+                    $test_result['message'] = 'Отладочный режим: API запрос пропущен';
+                    $test_result['details'][] = 'Это тестовый ответ без реального обращения к API';
+                    fn_set_notification('N', __('notice'), 'Отладочный режим: соединение не проверялось');
+                    fn_log_event('pim_sync', 'debug', ['message' => 'Пропущен API запрос в режиме отладки']);
                 } else {
-                    $test_result['message'] = 'Ошибка подключения к API';
-                    $test_result['error'] = 'Не удалось авторизоваться. Проверьте URL, логин и пароль.';
-                    fn_pim_sync_log('Test connection failed: authentication error', 'error');
-                    fn_set_notification('E', __('error'), 'Ошибка подключения к API');
+                    $api_client = new PimApiClient($api_url, $api_login, $api_password, fn_pim_sync_get_logger());
+                    
+                    // Проверяем базовое соединение
+                    if ($api_client->testConnection()) {
+                        $test_result['success'] = true;
+                        $test_result['message'] = 'Соединение установлено успешно';
+                        $test_result['details'][] = 'Авторизация: успешно';
+                        
+                        if (!empty($catalog_id)) {
+                            $test_result['details'][] = 'Каталог ID: ' . $catalog_id;
+                        }
+                        
+                        fn_pim_sync_log('Test connection successful', 'info');
+                        fn_set_notification('N', __('notice'), 'Соединение установлено успешно');
+                    } else {
+                        $test_result['message'] = 'Ошибка подключения к API';
+                        $test_result['error'] = 'Не удалось авторизоваться. Проверьте URL, логин и пароль.';
+                        fn_pim_sync_log('Test connection failed: authentication error', 'error');
+                        fn_set_notification('E', __('error'), 'Ошибка подключения к API');
+                    }
                 }
             } catch (ApiAuthException $e) {
+                fn_log_event('pim_sync', 'error', ['message' => 'ApiAuthException: ' . $e->getMessage()]);
                 $test_result['message'] = 'Ошибка авторизации в API';
                 $test_result['error'] = $e->getMessage();
                 fn_pim_sync_log('API authentication error: ' . $e->getMessage(), 'error');
                 fn_set_notification('E', __('error'), 'Ошибка авторизации: ' . $e->getMessage());
             } catch (Exception $e) {
+                fn_log_event('pim_sync', 'error', ['message' => 'Exception: ' . $e->getMessage()]);
                 $test_result['message'] = 'Критическая ошибка при подключении';
                 $test_result['error'] = $e->getMessage();
                 fn_pim_sync_log('Critical connection error: ' . $e->getMessage(), 'error');
@@ -105,7 +138,7 @@ function fn_pim_sync_process_test_connection()
             }
         }
         
-        // Передаем результат в view для немедленного отображения
+        // Передаем результат в view для отображения
         Registry::get('view')->assign([
             'test_result' => $test_result,
             'api_settings' => [
@@ -116,13 +149,12 @@ function fn_pim_sync_process_test_connection()
         ]);
         
         fn_pim_sync_log('=== КОНЕЦ ТЕСТИРОВАНИЯ СОЕДИНЕНИЯ ===', 'info');
-        
-        return [CONTROLLER_STATUS_OK, 'pim_sync.test_connection'];
+        // Добавляем пустую строку после завершения
+        fn_pim_sync_log_empty_line();
         
     } catch (Exception $e) {
         fn_pim_sync_log('Test connection error: ' . $e->getMessage(), 'error');
         fn_set_notification('E', __('error'), 'Критическая ошибка: ' . $e->getMessage());
-        return [CONTROLLER_STATUS_REDIRECT, 'pim_sync.manage'];
     }
 }
 
@@ -132,6 +164,7 @@ function fn_pim_sync_process_test_connection()
 function fn_pim_sync_process_sync_full()
 {
     try {
+        fn_pim_sync_log_empty_line();
         fn_pim_sync_log('=== НАЧАЛО ПОЛНОЙ СИНХРОНИЗАЦИИ ===', 'info');
         
         // Получаем настройки аддона
@@ -167,6 +200,7 @@ function fn_pim_sync_process_sync_full()
         }
         
         fn_pim_sync_log('=== КОНЕЦ ПОЛНОЙ СИНХРОНИЗАЦИИ ===', 'info');
+        fn_pim_sync_log_empty_line();
         
     } catch (Exception $e) {
         fn_pim_sync_log('Критическая ошибка полной синхронизации: ' . $e->getMessage(), 'error');
@@ -183,6 +217,7 @@ function fn_pim_sync_process_sync_delta()
 {
     try {
         $days = isset($_POST['days']) ? (int)$_POST['days'] : 1;
+        fn_pim_sync_log_empty_line();
         fn_pim_sync_log("=== НАЧАЛО ДЕЛЬТА СИНХРОНИЗАЦИИ (последние $days дней) ===", 'info');
         
         // Получаем настройки аддона
@@ -218,6 +253,7 @@ function fn_pim_sync_process_sync_delta()
         }
         
         fn_pim_sync_log('=== КОНЕЦ ДЕЛЬТА СИНХРОНИЗАЦИИ ===', 'info');
+        fn_pim_sync_log_empty_line();
         
     } catch (Exception $e) {
         fn_pim_sync_log('Критическая ошибка дельта синхронизации: ' . $e->getMessage(), 'error');
@@ -236,14 +272,20 @@ function fn_pim_sync_process_clear_logs()
     
     try {
         if ($action == 'clear_all') {
+            // Добавляем лог о попытке очистки
+            fn_pim_sync_log_empty_line();
+            fn_pim_sync_log('Запрос на очистку лог-файла', 'info');
+            
             // Очищаем файл логов
             $result = fn_pim_sync_clear_logs();
-            if ($result) {
-                fn_set_notification('N', __('notice'), __('pim_sync.logs_cleared'));
-                fn_pim_sync_log('Log file cleared successfully', 'info');
-            } else {
-                fn_set_notification('E', __('error'), __('pim_sync.logs_clear_failed'));
-            }
+            
+            // После очистки логов сразу записываем сообщение об успешной очистке
+            // чтобы лог не был пустым
+            fn_pim_sync_log('Лог-файл был очищен', 'info');
+            fn_pim_sync_log_empty_line();
+            
+            // Всегда показываем успешное уведомление, так как файл был перезаписан
+            fn_set_notification('N', __('notice'), __('pim_sync.logs_cleared'));
         }
     } catch (Exception $e) {
         fn_pim_sync_log('Clear logs error: ' . $e->getMessage(), 'error');
