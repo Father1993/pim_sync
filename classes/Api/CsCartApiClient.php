@@ -3,15 +3,12 @@
  * PIM Sync
  *
  * @package Tygh\Addons\PimSync
- * @author Уровень
+ * @author Andrej Spinej
  * @copyright (c) 2025, Уровень
  */
-
 namespace Tygh\Addons\PimSync\Api;
-
 use Exception;
 use Tygh\Addons\PimSync\Utils\LoggerInterface;
-
 /**
  * Клиент для работы с CS-Cart REST API
  */
@@ -23,12 +20,12 @@ class CsCartApiClient extends BaseApiClient
     /**
      * Конструктор
      * 
-     * @param string $api_url URL API CS-Cart
-     * @param string $email Email пользователя
-     * @param string $api_key API ключ пользователя
-     * @param LoggerInterface|null $logger Логгер
+     * @param string $api_url URL
+     * @param string $email Email
+     * @param string $api_key API
+     * @param LoggerInterface|null $logger
      */
-    public function __construct($api_url, $email, $api_key, LoggerInterface $logger = null)
+    public function __construct(string $api_url, string $email, string $api_key, ?LoggerInterface $logger = null)
     {
         parent::__construct($api_url, $logger);
         
@@ -39,9 +36,9 @@ class CsCartApiClient extends BaseApiClient
     /**
      * Проверить соединение с API
      *
-     * @return bool Результат проверки соединения
+     * @return bool
      */
-    public function testConnection()
+    public function testConnection(): bool
     {
         try {
             $response = $this->makeRequest('/api/2.0/version', 'GET');
@@ -55,83 +52,83 @@ class CsCartApiClient extends BaseApiClient
     /**
      * Получает список категорий из CS-Cart
      *
-     * @param array $params Параметры запроса
+     * @param string|null $scope Не используется в CS-Cart API
+     * @param array $params
      * @return array Список категорий
-     * @throws Exception При ошибке запроса
+     * @throws Exception
      */
-    public function getCategories(array $params = []): array
+    public function getCategories(?string $scope = null, array $params = []): array
     {
-        $endpoint = '/api/categories/';
-        
+        $endpoint = '/api/2.0/categories/';
         if (!empty($params)) {
             $endpoint .= '?' . http_build_query($params);
         }
-        
         return $this->makeRequest($endpoint);
     }
-    
-    /**
-     * Создает или обновляет категорию в CS-Cart
-     *
-     * @param array $category Данные категории
-     * @param int|null $categoryId ID категории для обновления (null для создания новой)
-     * @return array Результат операции
-     * @throws Exception При ошибке запроса
-     */
-    public function updateCategory($category, $categoryId = null)
-    {
-        if ($categoryId) {
-            // Обновление существующей категории
-            return $this->makeRequest('/api/categories/' . $categoryId, 'PUT', $category);
-        } else {
-            // Создание новой категории
-            return $this->makeRequest('/api/categories/', 'POST', $category);
-        }
-    }
-    
+
     /**
      * Получает список продуктов из CS-Cart
      *
-     * @param array $params Параметры запроса
+     * @param string|null $scope Не используется в CS-Cart API
+     * @param array $params
      * @return array Список продуктов
-     * @throws Exception При ошибке запроса
+     * @throws Exception
      */
-    public function getProducts($params = [])
+    public function getProducts(?string $scope = null, array $params = []): array
     {
-        $endpoint = '/api/products/';
-        
+        $endpoint = '/api/2.0/products/';
         if (!empty($params)) {
             $endpoint .= '?' . http_build_query($params);
         }
-        
         return $this->makeRequest($endpoint);
     }
-    
+
+    /**
+     * Создает или обновляет категорию в CS-Cart
+     *
+     * @param array $category 
+     * @param int|null $categoryId ID категории для обновления (null для создания новой)
+     * @return array
+     * @throws Exception
+     */
+    public function updateCategory(array $category, ?int $categoryId = null): array
+    {
+        if ($categoryId) {
+            // Обновление существующей категории
+            $this->logger?->log("Обновление категории в CS-Cart ID: $categoryId", 'debug');
+            return $this->makeRequest('/api/2.0/categories/' . $categoryId, 'PUT', $category);
+        } else {
+            // Создание новой категории
+            $this->logger?->log("Создание новой категории в CS-Cart: {$category['category']}", 'debug');
+            return $this->makeRequest('/api/2.0/categories/', 'POST', $category);
+        }
+    }
+
     /**
      * Создает или обновляет продукт в CS-Cart
      *
      * @param array $product Данные продукта
      * @param int|null $productId ID продукта для обновления (null для создания нового)
-     * @return array Результат операции
-     * @throws Exception При ошибке запроса
+     * @return array
+     * @throws Exception
      */
-    public function updateProduct($product, $productId = null)
+    public function updateProduct(array $product, ?int $productId = null): array
     {
         if ($productId) {
             // Обновление существующего продукта
-            return $this->makeRequest('/api/products/' . $productId, 'PUT', $product);
+            return $this->makeRequest('/api/2.0/products/' . $productId, 'PUT', $product);
         } else {
             // Создание нового продукта
-            return $this->makeRequest('/api/products/', 'POST', $product);
+            return $this->makeRequest('/api/2.0/products/', 'POST', $product);
         }
     }
     
     /**
      * Получить HTTP заголовки для запроса с базовой авторизацией
      *
-     * @return array Массив заголовков
+     * @return array
      */
-    protected function getHeaders()
+    protected function getHeaders(): array
     {
         // Получаем базовые заголовки
         $headers = parent::getHeaders();

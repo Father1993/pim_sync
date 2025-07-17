@@ -1,20 +1,22 @@
 <?php
-
 /**
-* @file: func.php
-* @description: Main features of PIM Sync addon
-* @dependencies: CS-Cart core
-* @created: 2025-06-27
-*/
+ * PIM Sync - основные функции аддона
+ *
+ * @package Tygh\Addons\PimSync
+ * @author Andrej Spinej
+ * @copyright (c) 2025, Уровень
+ */
 
-if (! defined('BOOTSTRAP')) {
+if (!defined('BOOTSTRAP')) {
     die('Access denied');
 }
 
 // Подключаем файл с функциями логирования
 require_once(dirname(__FILE__) . '/logger.php');
 
-use Tygh\Addons\PimSync\PimApiClient;
+use Tygh\Addons\PimSync\Api\PimApiClient;
+use Tygh\Addons\PimSync\Api\CsCartApiClient;
+use Tygh\Addons\PimSync\PimSyncService;
 use Tygh\Registry;
 
 /**
@@ -22,7 +24,7 @@ use Tygh\Registry;
  */
 function fn_pim_sync_install()
 {
-    fn_pim_sync_log('PIM Sync addon installed successfully');
+    fn_pim_sync_log('PIM Sync addon installed successfully', 'info');
     return true;
 }
 
@@ -31,17 +33,19 @@ function fn_pim_sync_install()
  */
 function fn_pim_sync_uninstall()
 {
-    fn_pim_sync_log('PIM Sync addon uninstalled');
+    // Прямая запись в системный лог CS-Cart без использования классов аддона
+    fn_log_event('pim_sync', 'info', ['message' => 'PIM Sync addon uninstalled']);
     return true;
 }
 
 /**
-* Get PIM connection settings
-* @return array
-*/
+ * Получает настройки аддона PIM Sync
+ * 
+ * @return array Массив с настройками
+ */
 function fn_pim_sync_get_settings()
 {
-    // Получаем настройки через правильный метод CS-Cart
+    // Получаем настройки через Registry
     $addon_settings = Registry::get('addons.pim_sync');
     
     return [
@@ -65,6 +69,7 @@ function fn_pim_sync_get_settings()
 /**
  * Функция для отображения статуса соединения с PIM API
  * Используется в настройках аддона (тип info)
+ * 
  * @return string HTML с информацией о статусе
  */
 function fn_pim_sync_connection_status()
@@ -100,27 +105,32 @@ function fn_pim_sync_connection_status()
     $status_html .= '</a>';
     $status_html .= '</div>';
     
-    // Информация о последней синхронизации
-    $company_id = fn_get_runtime_company_id();
-    $last_log = fn_pim_sync_get_log_entries(1, $company_id);
-    if (!empty($last_log)) {
-        $log = $last_log[0];
-        $status_html .= '<div class="alert alert-info">';
-        $status_html .= '<strong>' . __('pim_sync.last_sync_info') . '</strong><br>';
-        $sync_type_translation = __('pim_sync.sync_type_' . $log['sync_type']);
-        if ($sync_type_translation === 'pim_sync.sync_type_' . $log['sync_type']) {
-            // Если перевод не найден, используем оригинальное значение
-            $sync_type_translation = $log['sync_type'];
+    // Информация о последней синхронизации (получаем из логов)
+    try {
+        $recent_logs = fn_pim_sync_get_recent_logs(10);
+        $sync_logs = array_filter($recent_logs, function($log) {
+            return strpos($log['message'], 'НАЧАЛО') !== false && 
+                (strpos($log['message'], 'СИНХРОНИЗАЦИИ') !== false);
+        });
+        
+        if (!empty($sync_logs)) {
+            $last_log = reset($sync_logs);
+            $status_html .= '<div class="alert alert-info">';
+            $status_html .= '<strong>' . __('pim_sync.last_sync_info') . '</strong><br>';
+            $status_html .= __('pim_sync.started_at') . ': ' . $last_log['timestamp'] . '<br>';
+            
+            // Определяем тип синхронизации по сообщению
+            $sync_type = (strpos($last_log['message'], 'ПОЛНОЙ') !== false) ? 'full' : 'delta';
+            $status_html .= __('pim_sync.sync_type') . ': ' . __('pim_sync.sync_type_' . $sync_type);
+            
+            $status_html .= '</div>';
+        } else {
+            $status_html .= '<div class="alert alert-info">';
+            $status_html .= __('pim_sync.no_sync_history');
+            $status_html .= '</div>';
         }
-        $status_html .= __('pim_sync.sync_type') . ': ' . $sync_type_translation . '<br>';
-        $status_html .= __('pim_sync.started_at') . ': ' . fn_date_format(strtotime($log['started_at']) ?: TIME, Registry::get('settings.Appearance.date_format') . ' ' . Registry::get('settings.Appearance.time_format')) . '<br>';
-        $status_html .= __('pim_sync.status') . ': ' . __('pim_sync.status_' . $log['status']);
-        if ($log['status'] === 'completed') {
-            $status_html .= '<br>' . __('pim_sync.affected_categories') . ': ' . (int)$log['affected_categories'];
-            $status_html .= '<br>' . __('pim_sync.affected_products') . ': ' . (int)$log['affected_products'];
-        }
-        $status_html .= '</div>';
-    } else {
+    } catch (Exception $e) {
+        // В случае ошибки с получением логов просто не показываем историю
         $status_html .= '<div class="alert alert-info">';
         $status_html .= __('pim_sync.no_sync_history');
         $status_html .= '</div>';
@@ -133,27 +143,33 @@ function fn_pim_sync_connection_status()
  * Получить сервис синхронизации PIM
  * 
  * @param int $company_id ID компании в CS-Cart
- * @return \Tygh\Addons\PimSync\PimSyncService
+ * @return object Сервис синхронизации
  */
 function fn_pim_sync_get_sync_service($company_id = 0)
 {
     // Получаем настройки
     $settings = fn_pim_sync_get_settings();
     
+    // Получаем экземпляр логгера
+    $logger = fn_pim_sync_get_logger();
+    
     // Инициализируем клиент PIM API
-    $pim_client = new \Tygh\Addons\PimSync\PimApiClient(
+    $pim_client = new PimApiClient(
         $settings['api_url'],
         $settings['api_login'],
-        $settings['api_password']
+        $settings['api_password'],
+        $logger
     );
     
     // Инициализируем клиент CS-Cart API
-    $cs_cart_client = new \Tygh\Addons\PimSync\CsCartApiClient(
-        $settings['cs_cart_api_url'],
+    $cs_cart_client = new CsCartApiClient(
+        $settings['cs_cart_api_url'] ?: fn_url('', 'A', 'http'),
         $settings['cs_cart_email'],
-        $settings['cs_cart_api_key']
+        $settings['cs_cart_api_key'],
+        $logger
     );
     
     // Создаем и возвращаем сервис синхронизации
-    return new \Tygh\Addons\PimSync\PimSyncService($pim_client, $cs_cart_client, $company_id);
+    // Примечание: Класс PimSyncService должен быть создан отдельно
+    return new Tygh\Addons\PimSync\PimSyncService($pim_client, $cs_cart_client, $company_id);
 }

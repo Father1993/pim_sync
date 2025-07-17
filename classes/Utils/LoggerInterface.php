@@ -6,44 +6,32 @@
  * @author Andrej Spinej
  * @copyright (c) 2025, Уровень
  */
-
 namespace Tygh\Addons\PimSync\Utils;
 
 interface LoggerInterface
 {
     /**
-     * Логирование сообщения
+     * Записывает сообщение в лог
      *
-     * @param string $message Текст сообщения
-     * @param string $level Уровень логирования (info, debug, warning, error, critical)
+     * @param string $message
+     * @param string $level Уровень логирования (debug, info, warning, error)
      * @return void
      */
     public function log(string $message, string $level = 'info'): void;
     
     /**
-     * Создает запись о начале синхронизации в БД
+     * Получает последние записи логов
      *
-     * @param string $sync_type Тип синхронизации
-     * @param int $company_id ID компании
-     * @return int ID созданной записи
+     * @param int $limit
+     * @param string|null $level
+     * @return array Массив записей логов
      */
-    public function createLogEntry(string $sync_type = 'manual', int $company_id = 0): int;
+    public function getRecentLogs(int $limit = 50, ?string $level = null): array;
     
     /**
-     * Обновляет запись в БД о синхронизации
+     * Очищает лог-файл
      *
-     * @param int $log_id ID записи
-     * @param array $data Данные для обновления
-     * @return void
+     * @return bool
      */
-    public function updateLogEntry(int $log_id, array $data): void;
-    
-    /**
-     * Получает записи логов из БД
-     *
-     * @param int $limit Количество записей
-     * @param int $company_id ID компании
-     * @return array
-     */
-    public function getLogEntries(int $limit = 10, int $company_id = 0): array;
+    public function clearLogs(): bool;
 }

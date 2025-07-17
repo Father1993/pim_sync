@@ -182,37 +182,11 @@
 
     <!-- Дополнительные запросы к базе данных -->
     <queries>
-        <!-- Создание таблицы логов синхронизации -->
-        <item for="install">
-            CREATE TABLE IF NOT EXISTS `?:pim_sync_log` (
-                `log_id` int(11) unsigned NOT NULL AUTO_INCREMENT,
-                `sync_type` enum('full','delta','manual','test_connection','categories','products','features') NOT NULL,
-                `started_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                `completed_at` timestamp NULL DEFAULT NULL,
-                `status` enum('running','completed','failed') DEFAULT 'running',
-                `affected_categories` int(11) unsigned DEFAULT '0',
-                `affected_products` int(11) unsigned DEFAULT '0',
-                `affected_features` int(11) unsigned DEFAULT '0',
-                `error_details` text,
-                `company_id` int(11) unsigned NOT NULL DEFAULT '0',
-                PRIMARY KEY (`log_id`),
-                KEY `company_id` (`company_id`),
-                KEY `status` (`status`),
-                KEY `sync_type` (`sync_type`),
-                KEY `started_at` (`started_at`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-        </item>
-        
-
-        
         <!-- Добавление привилегий -->
         <item for="install">
             INSERT IGNORE INTO `?:privileges` (`privilege`, `is_default`, `section_id`, `group_id`, `is_view`) 
             VALUES ('manage_pim_sync', 'Y', 'catalog', 'catalog', 'N')
         </item>
-        
-        <!-- Удаление таблиц при удалении -->
-        <item for="uninstall">DROP TABLE IF EXISTS `?:pim_sync_log`</item>
         
         <!-- Удаление привилегий при удалении -->
         <item for="uninstall">DELETE FROM `?:privileges` WHERE `privilege` = 'manage_pim_sync'</item>

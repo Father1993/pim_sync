@@ -6,13 +6,10 @@
  * @author Andrej Spinej
  * @copyright (c) 2025, Уровень
  */
-
 namespace Tygh\Addons\PimSync\Api;
-
 use Exception;
 use Tygh\Addons\PimSync\Exception\ApiAuthException;
 use Tygh\Addons\PimSync\Utils\LoggerInterface;
-
 /**
  * Клиент для работы с Compo PIM API
  */
@@ -26,15 +23,14 @@ class PimApiClient extends BaseApiClient
     /**
      * PimApiClient constructor
      *
-     * @param string $api_url URL API
-     * @param string $login Логин
-     * @param string $password Пароль
-     * @param LoggerInterface|null $logger Логгер
+     * @param string $api_url
+     * @param string $login
+     * @param string $password
+     * @param LoggerInterface|null $logger
      */
-    public function __construct($api_url, $login, $password, LoggerInterface $logger = null)
+    public function __construct(string $api_url, string $login, string $password, ?LoggerInterface $logger = null)
     {
         parent::__construct($api_url, $logger);
-        
         $this->login = $login;
         $this->password = $password;
     }
@@ -42,9 +38,9 @@ class PimApiClient extends BaseApiClient
     /**
      * Проверяет соединение с API
      *
-     * @return bool Результат проверки соединения
+     * @return bool
      */
-    public function testConnection()
+    public function testConnection(): bool
     {
         try {
             $this->authenticate();
@@ -58,14 +54,14 @@ class PimApiClient extends BaseApiClient
     /**
      * Выполняет запрос к API с автоматической авторизацией
      *
-     * @param string $endpoint Конечная точка API
-     * @param string $method HTTP метод
-     * @param mixed $data Данные для отправки
+     * @param string $endpoint
+     * @param string $method
+     * @param array|null $data
      * @param bool $use_auth Использовать ли авторизацию
      * @return array Ответ от API
-     * @throws Exception При ошибке запроса
+     * @throws Exception
      */
-    public function makeRequest($endpoint, $method = 'GET', $data = null, $use_auth = true)
+    public function makeRequest(string $endpoint, string $method = 'GET', ?array $data = null, bool $use_auth = true): array
     {
         // Проверяем необходимость авторизации
         if ($use_auth && (!$this->token || time() >= $this->token_expires)) {
@@ -86,7 +82,7 @@ class PimApiClient extends BaseApiClient
     /**
      * Авторизация и получение токена
      *
-     * @throws Exception При ошибке авторизации
+     * @throws Exception
      * @return void
      */
     private function authenticate()
@@ -100,7 +96,7 @@ class PimApiClient extends BaseApiClient
             
             // Выполняем запрос без авторизации
             $response = parent::makeRequest('/sign-in/', 'POST', $auth_data);
-            
+
             if ($response && isset($response['success']) && $response['success'] === true) {
 
                 if (!isset($response['data']['access']['token'])) {
@@ -127,74 +123,108 @@ class PimApiClient extends BaseApiClient
     /**
      * Получает список категорий из PIM
      *
-     * @param string $catalogId ID каталога
-     * @param array $params Дополнительные параметры запроса
+     * @param string|null $scope ID каталога
+     * @param array $params
      * @return array Список категорий
-     * @throws Exception При ошибке запроса
+     * @throws Exception
      */
-    public function getCategories($catalogId, $params = [])
-    {
-        $endpoint = '/api/v1/catalogs/' . $catalogId . '/categories';
-        
-        // Добавляем параметры в URL
-        if (!empty($params)) {
-            $endpoint .= '?' . http_build_query($params);
+        public function getCategories(?string $scope = null, array $params = []): array
+        {
+            if ($scope === null) {
+                throw new ApiAuthException('Catalog ID is required for PIM API', 400);
+            }
+            $endpoint = '/catalog/' . $scope;
+            if (!empty($params)) {
+                $endpoint .= '?' . http_build_query($params);
+            }
+            $response = $this->makeRequest($endpoint, 'GET');
+            if (isset($response['data']) && $response['success'] === true) {
+                return $response['data'];
+            }
+            return $response;
         }
-        
-        return $this->makeRequest($endpoint, 'GET');
-    }
+
     
     /**
      * Получает список продуктов из PIM
      *
-     * @param string $catalogId ID каталога
-     * @param array $params Дополнительные параметры запроса
+     * @param string|null $scope ID каталога
+     * @param array $params
      * @return array Список продуктов
-     * @throws Exception При ошибке запроса
+     * @throws Exception
      */
-    public function getProducts($catalogId, $params = [])
+    public function getProducts(?string $scope = null, array $params = []): array
     {
-        $endpoint = '/api/v1/catalogs/' . $catalogId . '/products';
-        
-        // Добавляем параметры в URL
+        if ($scope === null) {
+            throw new ApiAuthException('Catalog ID is required for PIM API', 400);
+        }
+        $endpoint = '/product/scroll';
+        $params['catalogId'] = $scope;
         if (!empty($params)) {
             $endpoint .= '?' . http_build_query($params);
         }
+        $response = $this->makeRequest($endpoint, 'GET');
+        if (isset($response['data']) && isset($response['data']['productElasticDtos']) && $response['success'] === true) {
+            return $response['data']['productElasticDtos'];
+        }
+        return isset($response['data']) ? $response['data'] : $response;
+    }
+
+    /**
+     * Получает товар по ID
+     *
+     * @param string $productId ID товара
+     * @return array Данные товара
+     * @throws Exception
+     */
+    public function getProductById(string $productId): array
+    {
+        $endpoint = '/product/' . $productId;
         
-        return $this->makeRequest($endpoint, 'GET');
+        $response = $this->makeRequest($endpoint, 'GET');
+        
+        // Проверяем структуру ответа и возвращаем данные
+        if (isset($response['data']) && $response['success'] === true) {
+            return $response['data'];
+        }
+        
+        return $response;
     }
     
     /**
      * Получает измененные продукты за указанный период
      *
-     * @param string $catalogId ID каталога
+     * @param string $catalogId
      * @param int $days Количество дней для поиска изменений
-     * @param array $params Дополнительные параметры запроса
+     * @param array $params 
      * @return array Список измененных продуктов
-     * @throws Exception При ошибке запроса
+     * @throws Exception
      */
-    public function getChangedProducts($catalogId, $days = 1, $params = [])
+    public function getChangedProducts(string $catalogId, int $days = 1, array $params = []): array
     {
-        // Рассчитываем дату для delta sync
-        $date = date('Y-m-d', strtotime('-' . (int)$days . ' days'));
-        
-        $defaultParams = [
-            'changed_since' => $date,
-            'limit' => 100,
-            'page' => 1
+        // Базовые параметры для запроса
+        $scrollParams = [
+            'catalogId' => $catalogId,
+            'day' => $days
         ];
-        
-        $mergedParams = array_merge($defaultParams, $params);
-        
-        return $this->getProducts($catalogId, $mergedParams);
+        $mergedParams = array_merge($scrollParams, $params);
+        $endpoint = '/product/scroll';        
+        if (!empty($mergedParams)) {
+            $endpoint .= '?' . http_build_query($mergedParams);
+        }        
+        $response = $this->makeRequest($endpoint, 'GET');
+        if (isset($response['data']) && isset($response['data']['productElasticDtos']) && $response['success'] === true) {
+            return $response['data']['productElasticDtos'];
+        }
+        return isset($response['data']) ? $response['data'] : $response;
     }
     
     /**
      * Получает заголовки для запросов
      *
-     * @return array Массив заголовков
+     * @return array
      */
-    protected function getHeaders()
+    protected function getHeaders(): array
     {
         $headers = parent::getHeaders();
         
