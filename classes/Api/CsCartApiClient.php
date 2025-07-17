@@ -59,7 +59,7 @@ class CsCartApiClient extends BaseApiClient
      * @return array Список категорий
      * @throws Exception При ошибке запроса
      */
-    public function getCategories($params = [])
+    public function getCategories(array $params = []): array
     {
         $endpoint = '/api/categories/';
         

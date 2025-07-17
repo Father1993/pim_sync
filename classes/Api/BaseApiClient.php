@@ -11,6 +11,7 @@ namespace Tygh\Addons\PimSync\Api;
 
 use Exception;
 use Tygh\Addons\PimSync\Utils\LoggerInterface;
+use Tygh\Addons\PimSync\Exception\ApiAuthException;
 
 abstract class BaseApiClient implements ClientInterface
 {
@@ -29,7 +30,7 @@ abstract class BaseApiClient implements ClientInterface
         ];
     }
 
-    public function makeRequest(string $endpoint, string $method = 'GET', ?array $data = null, $use_auth = true): array
+    public function makeRequest(string $endpoint, string $method = 'GET', ?array $data = null, bool $use_auth = true): array
     {
         $url = $this->api_url . $endpoint;
         $this->logger?->log("API запрос: $method $url", 'debug');
@@ -81,7 +82,11 @@ abstract class BaseApiClient implements ClientInterface
             throw new Exception('CURL error: ' . $curl_error);
         }
         if ($http_code >= 400) {
-            throw new Exception("API error: HTTP $http_code\nURL: $url\nResponse: $response");
+            throw new ApiAuthException(
+                "API error: HTTP $http_code", 
+                $http_code, 
+                ['url' => $url, 'response' => $response]
+            );
         }
 
         return $response;
