@@ -127,6 +127,7 @@ class Logger implements LoggerInterface
     return $logs;
     }
 
+    // Добавить дополнительные методы для очистки логов
     public function clearLogFile(): bool
     {
         if (file_exists($this->logFile)) {

@@ -3,7 +3,7 @@
  * PIM Sync
  *
  * @package Tygh\Addons\PimSync
- * @author Уровень
+ * @author Andrej Spinej
  * @copyright (c) 2025, Уровень
  */
 
@@ -104,7 +104,7 @@ class PimApiClient extends BaseApiClient
             if ($response && isset($response['success']) && $response['success'] === true) {
 
                 if (!isset($response['data']['access']['token'])) {
-                    throw new Exception('PIM API authentication failed: token not found in response');
+                    throw new ApiAuthException('PIM API authentication failed: token not found in response');
                 }
                 
                 $this->token = $response['data']['access']['token'];
@@ -116,7 +116,7 @@ class PimApiClient extends BaseApiClient
                 if (isset($response['message'])) {
                     $error_message .= ': ' . $response['message'];
                 }
-                throw new Exception($error_message);
+                throw new ApiAuthException($error_message, 0, $response);
             }
         } catch (Exception $e) {
             $this->logger?->log('Ошибка авторизации в PIM API: ' . $e->getMessage(), 'error');

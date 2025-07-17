@@ -16,15 +16,16 @@ use Exception;
  */
 class ApiAuthException extends Exception
 {
-    /**
-     * Конструктор
-     *
-     * @param string $message Сообщение об ошибке
-     * @param int $code Код ошибки
-     * @param Exception|null $previous Предыдущее исключение
-     */
-    public function __construct($message = "", $code = 0, Exception $previous = null)
+    private array $responseData = [];
+    
+    public function __construct($message = "", $code = 0, array $responseData = [], Exception $previous = null)
     {
         parent::__construct($message, $code, $previous);
+        $this->responseData = $responseData;
+    }
+    
+    public function getResponseData(): array
+    {
+        return $this->responseData;
     }
 }
