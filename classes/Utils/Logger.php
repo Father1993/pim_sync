@@ -6,18 +6,17 @@
  * @author Andrej Spinej
  * @copyright (c) 2025, Уровень
  */
-
 namespace Tygh\Addons\PimSync\Utils;
 use Tygh\Registry;
 
-class Logger implements LoggerInterface
+class FileLogger implements LoggerInterface
 {
     private string $logFile;
     
     /**
      * Конструктор
      *
-     * @param string|null $logFile Путь к файлу логов (если null, используется стандартный)
+     * @param string|null $logFile Путь к файлу логов
      */
     public function __construct(?string $logFile = null)
     {
@@ -31,9 +30,10 @@ class Logger implements LoggerInterface
     {
         $timestamp = date('Y-m-d H:i:s');
         $log_entry = "[$timestamp] [$level] $message" . PHP_EOL;
+        
         file_put_contents($this->logFile, $log_entry, FILE_APPEND | LOCK_EX);
         
-        // Записываем критические ошибки в системный лог CS-Cart
+        // Дублируем критические ошибки в системный лог CS-Cart
         if ($level === 'error' || $level === 'critical') {
             fn_log_event('pim_sync', $level, ['message' => $message]);
         }
@@ -42,97 +42,106 @@ class Logger implements LoggerInterface
     /**
      * {@inheritDoc}
      */
-    public function createLogEntry(string $sync_type = 'manual', int $company_id = 0): int
+    public function getRecentLogs(int $limit = 50, ?string $level = null): array
     {
-        $data = [
-            'sync_type' => $sync_type,
-            'started_at' => date('Y-m-d H:i:s'),
-            'status' => 'running',
-            'company_id' => $company_id,
-        ];
+        if (!file_exists($this->logFile)) {
+            return [];
+        }
         
-        db_query('INSERT INTO ?:pim_sync_log ?e', $data);
-        return (int)db_get_field("SELECT LAST_INSERT_ID()");
-    }
-    
-    /**
-     * {@inheritDoc}
-     */
-    public function updateLogEntry(int $log_id, array $data): void
-    {
-        db_query('UPDATE ?:pim_sync_log SET ?u WHERE log_id = ?i', $data, $log_id);
-    }
-    
-    /**
-     * {@inheritDoc}
-     */
-    public function getLogEntries(int $limit = 10, int $company_id = 0): array
-    {
-    $logs = db_get_array(
-    "SELECT * FROM ?:pim_sync_log WHERE company_id = ?i ORDER BY started_at DESC LIMIT ?i",
-    $company_id,
-    $limit
-    );
-
-    // Обработка файла логов
-    foreach ($logs as &$log) {
-    if (file_exists($this->logFile)) {
-    $log_content = file_get_contents($this->logFile);
-    if ($log_content) {
-        $lines = array_filter(explode("\n", $log_content));
-        $errors = [];
-        $warnings = [];
+        $logs = [];
+        $counter = 0;
         
-        // Поиск записей соответствующих данному лог-событию
-        // Ищем по временным меткам или другим маркерам
+        // Читаем файл с конца для получения последних записей
+        $lines = $this->readLastLines($this->logFile, $limit * 2); // Берем с запасом для фильтрации
+        
         foreach ($lines as $line) {
-            // Ищем записи лога, соответствующие этой записи синхронизации
-            $timestamp = strtotime($log['started_at']);
-            $completed_timestamp = !empty($log['completed_at']) ? strtotime($log['completed_at']) : time();
+            if ($counter >= $limit) {
+                break;
+            }
             
-            // Извлекаем временную метку из строки лога
-            if (preg_match('/^\[([\d-\s:]+)\]/', $line, $matches)) {
-                $log_time = strtotime($matches[1]);
+            // Парсим строку лога
+            if (preg_match('/^\[(.*?)\] \[(.*?)\] (.*)$/', $line, $matches)) {
+                $timestamp = $matches[1];
+                $entry_level = $matches[2];
+                $message = $matches[3];
                 
-                // Проверяем, попадает ли время в интервал синхронизации
-                if ($log_time >= $timestamp && $log_time <= $completed_timestamp) {
-                    if (strpos($line, "[error]") !== false) {
-                        $errors[] = trim(str_replace("[error]", "", strstr($line, "[error]")));
-                    }
-                    if (strpos($line, "[warning]") !== false) {
-                        $warnings[] = trim(str_replace("[warning]", "", strstr($line, "[warning]")));
-                    }
+                // Фильтр по уровню, если задан
+                if ($level !== null && $entry_level !== $level) {
+                    continue;
                 }
+                
+                $logs[] = [
+                    'timestamp' => $timestamp,
+                    'level' => $entry_level,
+                    'message' => $message
+                ];
+                
+                $counter++;
             }
         }
         
-        // Добавляем найденные ошибки и предупреждения в запись лога
-        $log['errors'] = $errors;
-        $log['warnings'] = $warnings;
-        
-        if (!empty($errors) || !empty($warnings)) {
-            $details = [];
-            if (!empty($errors)) {
-                $details[] = "Ошибки:\n" . implode("\n", $errors);
-            }
-            if (!empty($warnings)) {
-                $details[] = "Предупреждения:\n" . implode("\n", $warnings);
-            }
-            $log['error_details'] = implode("\n\n", $details);
-        }
-        }
-      }
+        return $logs;
     }
     
-    return $logs;
-    }
-
-    // Добавить дополнительные методы для очистки логов
-    public function clearLogFile(): bool
+    /**
+     * {@inheritDoc}
+     */
+    public function clearLogs(): bool
     {
-        if (file_exists($this->logFile)) {
-            return (bool)file_put_contents($this->logFile, '');
+        return (bool)file_put_contents($this->logFile, '');
+    }
+    
+    /**
+     * Читает последние строки из файла
+     *
+     * @param string $file Путь к файлу
+     * @param int $lines Количество строк
+     * @return array Массив строк
+     */
+    private function readLastLines(string $file, int $lines): array
+    {
+        $result = [];
+        
+        if (!file_exists($file) || !is_readable($file)) {
+            return $result;
         }
-        return false;
+        
+        $f = fopen($file, 'r');
+        if ($f === false) {
+            return $result;
+        }
+        
+        $buffer = [];
+        $pos = -1;
+        $currentLines = 0;
+        $filesize = filesize($file);
+        
+        while ($currentLines < $lines && abs($pos) < $filesize) {
+            $pos--;
+            fseek($f, $pos, SEEK_END);
+            $char = fgetc($f);
+            
+            if ($char === "\n") {
+                $line = implode('', array_reverse($buffer));
+                if (!empty(trim($line))) {
+                    $result[] = $line;
+                    $currentLines++;
+                }
+                $buffer = [];
+            } else {
+                $buffer[] = $char;
+            }
+        }
+        
+        // Добавляем последнюю строку, если буфер не пуст
+        if (!empty($buffer)) {
+            $line = implode('', array_reverse($buffer));
+            if (!empty(trim($line))) {
+                $result[] = $line;
+            }
+        }
+        
+        fclose($f);
+        return array_reverse($result);
     }
 }

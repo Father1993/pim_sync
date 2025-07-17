@@ -6,9 +6,7 @@
  * @author Andrej Spinej
  * @copyright (c) 2025, Уровень
  */
-
 namespace Tygh\Addons\PimSync\Api;
-
 use Exception;
 use Tygh\Addons\PimSync\Utils\LoggerInterface;
 use Tygh\Addons\PimSync\Exception\ApiAuthException;
@@ -42,7 +40,7 @@ abstract class BaseApiClient implements ClientInterface
         return $decoded;
     }
 
-    protected function sendCurlRequest(string $url, string $method, mixed $data = null): string
+    protected function sendCurlRequest(string $url, string $method, ?array $data = null): string
     {
         $ch = curl_init();
 
