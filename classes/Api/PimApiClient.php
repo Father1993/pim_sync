@@ -28,7 +28,7 @@ class PimApiClient extends BaseApiClient
      * @param string $password
      * @param LoggerInterface|null $logger
      */
-    public function __construct(string $api_url, string $email, string $api_key, ?LoggerInterface $logger = null)
+    public function __construct(string $api_url, string $login, string $password, ?LoggerInterface $logger = null)
     {
         parent::__construct($api_url, $logger);
         $this->login = $login;

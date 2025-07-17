@@ -9,14 +9,14 @@
 namespace Tygh\Addons\PimSync\Utils;
 use Tygh\Registry;
 
-class FileLogger implements LoggerInterface
+class Logger implements LoggerInterface
 {
     private string $logFile;
     
     /**
      * Конструктор
      *
-     * @param string|null $logFile Путь к файлу логов
+     * @param string|null $logFile Путь к файлу лога
      */
     public function __construct(?string $logFile = null)
     {
@@ -30,9 +30,8 @@ class FileLogger implements LoggerInterface
     {
         $timestamp = date('Y-m-d H:i:s');
         $log_entry = "[$timestamp] [$level] $message" . PHP_EOL;
-        
         file_put_contents($this->logFile, $log_entry, FILE_APPEND | LOCK_EX);
-        
+    
         // Дублируем критические ошибки в системный лог CS-Cart
         if ($level === 'error' || $level === 'critical') {
             fn_log_event('pim_sync', $level, ['message' => $message]);
@@ -47,7 +46,6 @@ class FileLogger implements LoggerInterface
         if (!file_exists($this->logFile)) {
             return [];
         }
-        
         $logs = [];
         $counter = 0;
         
@@ -94,7 +92,7 @@ class FileLogger implements LoggerInterface
     /**
      * Читает последние строки из файла
      *
-     * @param string $file Путь к файлу
+     * @param string $file
      * @param int $lines Количество строк
      * @return array Массив строк
      */
