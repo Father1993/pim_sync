@@ -128,18 +128,21 @@ class PimApiClient extends BaseApiClient
      * @return array Список категорий
      * @throws Exception
      */
-    public function getCategories(?string $scope = null, array $params = []): array
-    {
-        if ($scope === null) {
-            throw new ApiAuthException('Catalog ID is required for PIM API', 400);
+        public function getCategories(?string $scope = null, array $params = []): array
+        {
+            if ($scope === null) {
+                throw new ApiAuthException('Catalog ID is required for PIM API', 400);
+            }
+            $endpoint = '/catalog/' . $scope;
+            if (!empty($params)) {
+                $endpoint .= '?' . http_build_query($params);
+            }
+            $response = $this->makeRequest($endpoint, 'GET');
+            if (isset($response['data']) && $response['success'] === true) {
+                return $response['data'];
+            }
+            return $response;
         }
-        $endpoint = '/api/v1/catalogs/' . $scope . '/categories';
-        // Добавляем параметры в URL
-        if (!empty($params)) {
-            $endpoint .= '?' . http_build_query($params);
-        }
-        return $this->makeRequest($endpoint, 'GET');
-    }
 
     
     /**
@@ -155,12 +158,37 @@ class PimApiClient extends BaseApiClient
         if ($scope === null) {
             throw new ApiAuthException('Catalog ID is required for PIM API', 400);
         }
-        $endpoint = '/api/v1/catalogs/' . $scope . '/products';
-        // Добавляем параметры в URL
+        $endpoint = '/product/scroll';
+        $params['catalogId'] = $scope;
         if (!empty($params)) {
             $endpoint .= '?' . http_build_query($params);
         }
-        return $this->makeRequest($endpoint, 'GET');
+        $response = $this->makeRequest($endpoint, 'GET');
+        if (isset($response['data']) && isset($response['data']['productElasticDtos']) && $response['success'] === true) {
+            return $response['data']['productElasticDtos'];
+        }
+        return isset($response['data']) ? $response['data'] : $response;
+    }
+
+    /**
+     * Получает товар по ID
+     *
+     * @param string $productId ID товара
+     * @return array Данные товара
+     * @throws Exception
+     */
+    public function getProductById(string $productId): array
+    {
+        $endpoint = '/product/' . $productId;
+        
+        $response = $this->makeRequest($endpoint, 'GET');
+        
+        // Проверяем структуру ответа и возвращаем данные
+        if (isset($response['data']) && $response['success'] === true) {
+            return $response['data'];
+        }
+        
+        return $response;
     }
     
     /**
@@ -174,15 +202,21 @@ class PimApiClient extends BaseApiClient
      */
     public function getChangedProducts(string $catalogId, int $days = 1, array $params = []): array
     {
-        // Рассчитываем дату для delta sync
-        $date = date('Y-m-d', strtotime('-' . (int)$days . ' days'));
-        $defaultParams = [
-            'changed_since' => $date,
-            'limit' => 100,
-            'page' => 1
+        // Базовые параметры для запроса
+        $scrollParams = [
+            'catalogId' => $catalogId,
+            'day' => $days
         ];
-        $mergedParams = array_merge($defaultParams, $params);
-        return $this->getProducts($catalogId, $mergedParams);
+        $mergedParams = array_merge($scrollParams, $params);
+        $endpoint = '/product/scroll';        
+        if (!empty($mergedParams)) {
+            $endpoint .= '?' . http_build_query($mergedParams);
+        }        
+        $response = $this->makeRequest($endpoint, 'GET');
+        if (isset($response['data']) && isset($response['data']['productElasticDtos']) && $response['success'] === true) {
+            return $response['data']['productElasticDtos'];
+        }
+        return isset($response['data']) ? $response['data'] : $response;
     }
     
     /**
