@@ -222,3 +222,113 @@ function fn_pim_sync_get_sync_service($company_id = 0)
     $storefront_id = Registry::get('runtime.storefront_id') ?: 1;
     return new Tygh\Addons\PimSync\PimSyncService($pim_client, $cs_cart_client, $company_id, $storefront_id);
 }
+
+/**
+ * Получает список доступных витрин/компаний
+ *
+ * @return array
+ */
+function fn_pim_sync_get_available_storefronts()
+{
+    $storefronts = [];
+    
+    try {
+        // Пробуем получить через API
+        $cs_cart_client = fn_pim_sync_get_cs_cart_client();
+        if ($cs_cart_client) {
+            $response = $cs_cart_client->get('/api/2.0/vendors');
+            
+            if (!empty($response['vendors'])) {
+                foreach ($response['vendors'] as $vendor) {
+                    if ($vendor['status'] === 'A') { // Только активные
+                        $storefronts[] = [
+                            'company_id' => $vendor['company_id'],
+                            'name' => $vendor['company'],
+                            'email' => $vendor['email'] ?? '',
+                            'seo_name' => $vendor['seo_name'] ?? ''
+                        ];
+                    }
+                }
+                
+                if (!empty($storefronts)) {
+                    return $storefronts;
+                }
+            }
+        }
+    } catch (Exception $e) {
+        fn_pim_sync_log('Ошибка получения списка витрин через API: ' . $e->getMessage(), 'warning');
+    }
+    
+    // Если API не работает, пробуем получить напрямую из БД
+    try {
+        $companies = db_get_array("SELECT company_id, company, email, status FROM ?:companies WHERE status = ?s", 'A');
+        
+        if (!empty($companies)) {
+            foreach ($companies as $company) {
+                $storefronts[] = [
+                    'company_id' => $company['company_id'],
+                    'name' => $company['company'],
+                    'email' => $company['email'] ?? '',
+                    'seo_name' => ''
+                ];
+            }
+            fn_pim_sync_log('Витрины загружены из БД: ' . count($storefronts), 'info');
+        }
+    } catch (Exception $e) {
+        fn_pim_sync_log('Ошибка получения витрин из БД: ' . $e->getMessage(), 'error');
+    }
+    
+    return $storefronts;
+}
+
+/**
+ * Получить клиент CS-Cart API
+ * 
+ * @return CsCartApiClient|null
+ */
+function fn_pim_sync_get_cs_cart_client()
+{
+    try {
+        $settings = fn_pim_sync_get_settings();
+        $logger = fn_pim_sync_get_logger();
+        
+        $cs_cart_client = new CsCartApiClient(
+            $settings['cs_cart_api_url'] ?: fn_url('', 'A', 'http'),
+            $settings['cs_cart_email'],
+            $settings['cs_cart_api_key'],
+            $logger
+        );
+        
+        return $cs_cart_client;
+        
+    } catch (Exception $e) {
+        fn_pim_sync_log('Ошибка создания CS-Cart API клиента: ' . $e->getMessage(), 'error');
+        return null;
+    }
+}
+
+/**
+ * Получить клиент PIM API
+ * 
+ * @return PimApiClient|null
+ */
+function fn_pim_sync_get_pim_client()
+{
+    try {
+        $settings = fn_pim_sync_get_settings();
+        $logger = fn_pim_sync_get_logger();
+        
+        $pim_client = new PimApiClient(
+            $settings['api_url'],
+            $settings['api_login'],
+            $settings['api_password'],
+            $logger
+        );
+        
+        return $pim_client;
+        
+    } catch (Exception $e) {
+        fn_pim_sync_log('Ошибка создания PIM API клиента: ' . $e->getMessage(), 'error');
+        return null;
+    }
+}

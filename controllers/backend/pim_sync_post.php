@@ -31,11 +31,8 @@ if (!fn_check_permissions('pim_sync', 'pim_sync_post', 'admin')) {
     die('Access denied: Insufficient permissions');
 }
 
-// Валидация CSRF токена
-if (!fn_is_csrf_token_valid()) {
-    fn_set_notification('E', __('error'), __('csrf_token_invalid'));
-    return [CONTROLLER_STATUS_REDIRECT, 'pim_sync.manage'];
-}
+// CS-Cart автоматически проверяет CSRF токены через fn.control.php
+// Дополнительная проверка не требуется
 
 /**
  * Валидация входных данных
@@ -62,7 +59,7 @@ function fn_pim_sync_validate_input($required_fields = [], $optional_fields = []
     
     // Защита от XSS
     foreach ($validated_data as $key => $value) {
-        $validated_data[$key] = fn_strip_tags($value);
+        $validated_data[$key] = strip_tags($value);
     }
     
     return $validated_data;
@@ -372,4 +369,74 @@ function fn_pim_sync_process_clear_logs()
     // Добавляем параметр для принудительного обновления страницы
     $suffix = '?' . uniqid();
     return [CONTROLLER_STATUS_OK, 'pim_sync.clear_logs' . $suffix];
+}
+
+/**
+ * Обработка запроса на синхронизацию дерева категорий
+ */
+function fn_pim_sync_process_sync_category_tree()
+{
+    // Валидация входных данных
+    $validated_data = fn_pim_sync_validate_input(['catalog_id', 'company_id'], ['storefront_id']);
+    if ($validated_data === false) {
+        return [CONTROLLER_STATUS_REDIRECT, 'pim_sync.manage'];
+    }
+    
+    try {
+        $catalog_id = $validated_data['catalog_id'];
+        $company_id = (int)$validated_data['company_id'];
+        $storefront_id = isset($validated_data['storefront_id']) ? (int)$validated_data['storefront_id'] : 1;
+        
+        fn_pim_sync_log_empty_line();
+        fn_pim_sync_log("=== НАЧАЛО СИНХРОНИЗАЦИИ ДЕРЕВА КАТЕГОРИЙ ===", 'info');
+        fn_pim_sync_log("Каталог: $catalog_id, Компания: $company_id, Витрина: $storefront_id", 'info');
+        
+        // Получаем сервис синхронизации для указанной компании
+        $sync_service = fn_pim_sync_get_sync_service($company_id, $storefront_id);
+        
+        if (!$sync_service) {
+            throw new Exception('Не удалось инициализировать сервис синхронизации');
+        }
+        
+        // Выполняем синхронизацию категорий
+        $result = $sync_service->syncCategories($catalog_id, $company_id, $storefront_id);
+        
+        if ($result && !isset($result['error'])) {
+            $created = $result['created'] ?? 0;
+            $updated = $result['updated'] ?? 0;
+            $failed = $result['failed'] ?? 0;
+            $total = $result['total'] ?? 0;
+            
+            fn_pim_sync_log("Синхронизация категорий завершена. Всего: $total, Создано: $created, Обновлено: $updated, Ошибок: $failed", 'info');
+            
+            if ($failed > 0) {
+                fn_set_notification('W', __('warning'), "Синхронизация завершена с ошибками. Создано: $created, Обновлено: $updated, Ошибок: $failed");
+            } else {
+                fn_set_notification('N', __('notice'), "Синхронизация категорий успешно завершена. Всего обработано: $total, Создано: $created, Обновлено: $updated");
+            }
+            
+            // Сохраняем детали в лог
+            if (!empty($result['details'])) {
+                foreach ($result['details'] as $detail) {
+                    $action = $detail['action'] ?? 'unknown';
+                    $pim_header = $detail['pim_header'] ?? 'Unknown';
+                    $cscart_id = $detail['cscart_id'] ?? 'N/A';
+                    fn_pim_sync_log("  - $action: $pim_header (CS-Cart ID: $cscart_id)", 'debug');
+                }
+            }
+        } else {
+            $error_msg = isset($result['error']) ? $result['error'] : 'Неизвестная ошибка синхронизации';
+            fn_pim_sync_log('Синхронизация категорий завершилась с ошибкой: ' . $error_msg, 'error');
+            fn_set_notification('E', __('error'), 'Ошибка синхронизации категорий: ' . $error_msg);
+        }
+        
+        fn_pim_sync_log('=== КОНЕЦ СИНХРОНИЗАЦИИ ДЕРЕВА КАТЕГОРИЙ ===', 'info');
+        fn_pim_sync_log_empty_line();
+        
+    } catch (Exception $e) {
+        fn_pim_sync_log('Критическая ошибка синхронизации категорий: ' . $e->getMessage(), 'error');
+        fn_set_notification('E', __('error'), 'Критическая ошибка: ' . $e->getMessage());
+    }
+    
+    return [CONTROLLER_STATUS_OK, 'pim_sync.manage'];
 }

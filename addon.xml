@@ -100,7 +100,7 @@
                     <!-- API Key пользователя CS-Cart -->
                     <item id="cs_cart_api_key">
                         <type>password</type>
-                        <default_value>S9p87K3yM1gcp117K20fHBrL04Jr3V92</default_value>
+                        <default_value>0r220woN33Cyo81GC722J6oww90Fy8V2</default_value>
                         <variants/>
                     </item>
                 </items>

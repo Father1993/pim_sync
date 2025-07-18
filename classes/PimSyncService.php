@@ -294,15 +294,15 @@ class PimSyncService
             $rootCategory = $categories[0];
             $result['total'] = $this->countCategoriesRecursive($rootCategory);
             
-            // Получаем существующие категории из CS-Cart для поиска соответствий
-            $existingCategories = $this->getCsCartCategories($targetCompanyId, $targetStorefrontId);
-            $syncUidMap = $this->buildSyncUidMap($existingCategories);
+            // УДАЛЯЕМ: не используем syncUidMap, полагаемся на таблицы маппинга
+            // $existingCategories = $this->getCsCartCategories($targetCompanyId, $targetStorefrontId);
+            // $syncUidMap = $this->buildSyncUidMap($existingCategories);
             
             // Загружаем карту маппинга PIM ID -> CS-Cart ID из БД
             $pimIdMap = $this->buildPimIdToCsCartIdMap($catalogId, $targetCompanyId, $targetStorefrontId);
             
             // Синхронизируем категории рекурсивно
-            $syncResult = $this->processCategoryTree($rootCategory, 0, $targetCompanyId, $targetStorefrontId, $syncUidMap, $catalogId, $pimIdMap);
+            $syncResult = $this->processCategoryTree($rootCategory, 0, $targetCompanyId, $targetStorefrontId, $catalogId, $pimIdMap);
             
             // Обновляем результат
             $result['created'] = $syncResult['created'];
@@ -470,10 +470,10 @@ class PimSyncService
             'category_ids' => $categoryIds,
             'main_category' => reset($categoryIds), // Первая категория как основная
             'company_id' => $companyId,
-            'storefront_id' => $storefrontId,
-            // Кастомные поля для хранения данных PIM
-            'pim_sync_uid' => $product['syncUid'] ?? '',
-            'pim_id' => $product['id'] ?? ''
+            'storefront_id' => $storefrontId
+            // УДАЛЯЕМ: PIM поля не поддерживаются CS-Cart API
+            // 'pim_sync_uid' => $product['syncUid'] ?? '',
+            // 'pim_id' => $product['id'] ?? ''
         ];
         
         // Добавляем описания если есть
@@ -667,27 +667,6 @@ class PimSyncService
     }
 
     /**
-     * Строит карту соответствия syncUid к категориям CS-Cart
-     *
-     * @param array $categories Массив категорий CS-Cart
-     * @return array Карта соответствия syncUid => category
-     */
-    private function buildSyncUidMap(array $categories): array
-    {
-        $map = [];
-        
-        foreach ($categories as $category) {
-            // Ищем кастомное поле pim_sync_uid в категории
-            if (isset($category[self::PIM_SYNC_UID_FIELD])) {
-                $syncUid = $category[self::PIM_SYNC_UID_FIELD];
-                $map[$syncUid] = $category;
-            }
-        }
-        
-        return $map;
-    }
-    
-    /**
      * Строит карту соответствия PIM ID к CS-Cart ID категорий из БД
      *
      * @param string $catalogId ID каталога в PIM
@@ -756,12 +735,11 @@ class PimSyncService
      * @param int $parentId ID родительской категории в CS-Cart (0 для корневых)
      * @param int|string $companyId ID компании в CS-Cart
      * @param int|null $storefrontId ID витрины в CS-Cart
-     * @param array $syncUidMap Карта соответствия syncUid => category
      * @param string $catalogId ID каталога в PIM
      * @param array $pimIdMap Карта соответствия PIM ID => CS-Cart ID
      * @return array Результат синхронизации
      */
-    private function processCategoryTree(array $category, int $parentId, $companyId, ?int $storefrontId, array $syncUidMap, string $catalogId, array &$pimIdMap): array
+    private function processCategoryTree(array $category, int $parentId, $companyId, ?int $storefrontId, string $catalogId, array &$pimIdMap): array
     {
         $result = [
             'created' => 0,
@@ -782,35 +760,35 @@ class PimSyncService
             $csCartCategoryId = null;
             
             if (!$shouldSkipCategory) {
-                // Проверяем существование категории по syncUid
-                $existingCategory = isset($syncUidMap[$category['syncUid']]) ? $syncUidMap[$category['syncUid']] : null;
+                // Проверяем существование категории по PIM ID в таблице маппинга
+                $existingCategoryId = isset($pimIdMap[$category['id']]) ? $pimIdMap[$category['id']] : null;
                 
                 // Формируем данные для CS-Cart
                 $categoryData = [
                     'category' => $category['header'],
-                    'company_id' => $companyId,
+                    'company_id' => $companyId,  // Используем переданный company_id
                     'status' => $category['enabled'] ? 'A' : 'D',
                     'position' => $category['pos'] ?? 0,
                     'parent_id' => $parentId,
                     'description' => $category['content'] ?? '',
                     'meta_keywords' => $category['htKeywords'] ?? '',
                     'meta_description' => $category['htDesc'] ?? '',
-                    'page_title' => $category['htHead'] ?? '',
-                    // Добавляем кастомные поля для хранения данных из PIM
-                    self::PIM_SYNC_UID_FIELD => $category['syncUid'],
-                    self::PIM_ID_FIELD => $category['id']
+                    'page_title' => $category['htHead'] ?? ''
+                    // УДАЛЯЕМ: PIM поля не поддерживаются CS-Cart API  
+                    // self::PIM_SYNC_UID_FIELD => $category['syncUid'],
+                    // self::PIM_ID_FIELD => $category['id']
                 ];
                 
-                // Если есть storefront_id, добавляем его
+                // Если есть storefront_id, добавляем его (опционально для CS-Cart)
                 if ($storefrontId) {
                     $categoryData['storefront_id'] = $storefrontId;
                 }
                 
                 $action = '';
                 
-                if ($existingCategory) {
+                if ($existingCategoryId) {
                     // Обновляем существующую категорию
-                    $csCartCategoryId = $existingCategory['category_id'];
+                    $csCartCategoryId = $existingCategoryId;
                     $this->logger?->log("Обновление существующей категории: {$category['header']} (ID: $csCartCategoryId)", 'info');
                     
                     try {
@@ -829,7 +807,7 @@ class PimSyncService
                         } else {
                             $result['failed']++;
                             $action = 'update_failed';
-                            $this->logger?->log("Не удалось обновить категорию: {$category['header']} (ID: $csCartCategoryId)", 'warning');
+                            $this->logger?->log("Ошибка при обновлении категории {$category['header']} (ID: $csCartCategoryId)", 'error');
                         }
                     } catch (Exception $e) {
                         $result['failed']++;
@@ -847,10 +825,6 @@ class PimSyncService
                             $result['created']++;
                             $action = 'created';
                             $this->logger?->log("Создана категория: {$category['header']} (ID: $csCartCategoryId)", 'info');
-                            
-                            // Добавляем созданную категорию в карту соответствия
-                            $categoryData['category_id'] = $csCartCategoryId;
-                            $syncUidMap[$category['syncUid']] = $categoryData;
                             
                             // Сохраняем маппинг в БД
                             $this->saveCategoryMapping($category, $csCartCategoryId, $catalogId, $companyId, $storefrontId);
@@ -892,7 +866,6 @@ class PimSyncService
                         $childParentId,
                         $companyId,
                         $storefrontId,
-                        $syncUidMap,
                         $catalogId,
                         $pimIdMap
                     );
