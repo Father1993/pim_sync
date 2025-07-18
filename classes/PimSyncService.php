@@ -29,8 +29,14 @@ class PimSyncService
     /** @var int */
     private $companyId;
     
+    /** @var int */
+    private $storefrontId;
+    
     /** @var LoggerInterface|null */
     private $logger;
+    
+    /** @var array */
+    private $storefrontConfig = [];
     
     /** @var string */
     private const PIM_SYNC_UID_FIELD = 'pim_sync_uid';
@@ -44,29 +50,207 @@ class PimSyncService
      * @param PimApiClient $pimClient Клиент PIM API
      * @param CsCartApiClient $csCartClient Клиент CS-Cart API
      * @param int $companyId ID компании в CS-Cart
+     * @param int $storefrontId ID витрины в CS-Cart
      * @param LoggerInterface|null $logger Логгер
      */
     public function __construct(
         PimApiClient $pimClient,
         CsCartApiClient $csCartClient,
         int $companyId = 0,
+        int $storefrontId = 1,
         ?LoggerInterface $logger = null
     ) {
         $this->pimClient = $pimClient;
         $this->csCartClient = $csCartClient;
         $this->companyId = $companyId;
+        $this->storefrontId = $storefrontId;
         $this->logger = $logger;
+        
+        // Загружаем конфигурацию витрин
+        $this->loadStorefrontConfig();
+    }
+    
+    /**
+     * Загружает конфигурацию витрин из CS-Cart
+     */
+    private function loadStorefrontConfig(): void
+    {
+        try {
+            $this->logger?->log('Загрузка конфигурации витрин из CS-Cart', 'info');
+            
+            // Получаем список всех витрин/продавцов
+            $response = $this->csCartClient->get('/api/2.0/vendors');
+            
+            if (!empty($response['stores'])) {
+                foreach ($response['stores'] as $store) {
+                    $this->storefrontConfig[$store['company_id']] = [
+                        'company_id' => $store['company_id'],
+                        'name' => $store['company'],
+                        'seo_name' => $store['seo_name'],
+                        'status' => $store['status'],
+                        'email' => $store['email'] ?? ''
+                    ];
+                }
+                
+                $this->logger?->log('Загружено витрин: ' . count($this->storefrontConfig), 'info');
+            }
+            
+        } catch (Exception $e) {
+            $this->logger?->log('Ошибка при загрузке конфигурации витрин: ' . $e->getMessage(), 'error');
+        }
+    }
+    
+    /**
+     * Получает конфигурацию для определенной витрины
+     *
+     * @param int $companyId ID компании
+     * @return array|null Конфигурация витрины или null если не найдена
+     */
+    public function getStorefrontConfig(int $companyId): ?array
+    {
+        return $this->storefrontConfig[$companyId] ?? null;
+    }
+    
+    /**
+     * Получает список всех доступных витрин
+     *
+     * @return array Список витрин
+     */
+    public function getAvailableStorefronts(): array
+    {
+        return $this->storefrontConfig;
+    }
+    
+    /**
+     * Определяет целевую витрину для каталога PIM
+     *
+     * @param string $catalogId ID каталога PIM
+     * @return array Конфигурация витрины [company_id, storefront_id]
+     */
+    public function getTargetStorefrontForCatalog(string $catalogId): array
+    {
+        // Загружаем конфигурацию маппинга из файла
+        $mappingConfigFile = __DIR__ . '/../config/catalog_mapping.php';
+        $mappingConfig = [];
+        
+        if (file_exists($mappingConfigFile)) {
+            $mappingConfig = include $mappingConfigFile;
+        }
+        
+        // Ищем конфигурацию для конкретного каталога
+        if (isset($mappingConfig[$catalogId])) {
+            $config = $mappingConfig[$catalogId];
+            return [
+                'company_id' => $config['company_id'],
+                'storefront_id' => $config['storefront_id'],
+                'name' => $config['name'] ?? $catalogId,
+                'sync_products' => $config['sync_products'] ?? true,
+                'sync_categories' => $config['sync_categories'] ?? true
+            ];
+        }
+        
+        // Используем дефолтную конфигурацию
+        $defaultConfig = $mappingConfig['default'] ?? [
+            'company_id' => $this->companyId,
+            'storefront_id' => $this->storefrontId
+        ];
+        
+        return [
+            'company_id' => $defaultConfig['company_id'],
+            'storefront_id' => $defaultConfig['storefront_id'],
+            'name' => $defaultConfig['name'] ?? 'Каталог по умолчанию',
+            'sync_products' => $defaultConfig['sync_products'] ?? false,
+            'sync_categories' => $defaultConfig['sync_categories'] ?? false
+        ];
+    }
+    
+    /**
+     * Проверяет существование и активность витрины
+     *
+     * @param int $companyId ID компании
+     * @return bool true если витрина существует и активна
+     */
+    private function validateStorefront(int $companyId): bool
+    {
+        // Специальная обработка для company_id = 0 (общие категории)
+        if ($companyId === 0) {
+            return true;
+        }
+        
+        $config = $this->getStorefrontConfig($companyId);
+        $isValid = $config !== null && $config['status'] === 'A';
+        
+        if (!$isValid) {
+            $this->logger?->log("Витрина с ID {$companyId} не найдена или неактивна", 'warning');
+        }
+        
+        return $isValid;
+    }
+    
+    /**
+     * Проверяет корректность параметров витрины
+     *
+     * @param int $companyId ID компании
+     * @param int $storefrontId ID витрины
+     * @return array Результат валидации [valid => bool, message => string]
+     */
+    private function validateStorefrontParameters(int $companyId, int $storefrontId): array
+    {
+        $result = ['valid' => true, 'message' => ''];
+        
+        // Проверка storefront_id
+        if ($storefrontId < 1) {
+            $result['valid'] = false;
+            $result['message'] = "Некорректный storefront_id: {$storefrontId}";
+            return $result;
+        }
+        
+        // Проверка company_id
+        if ($companyId < 0) {
+            $result['valid'] = false;
+            $result['message'] = "Некорректный company_id: {$companyId}";
+            return $result;
+        }
+        
+        // Проверка существования витрины
+        if (!$this->validateStorefront($companyId)) {
+            $result['valid'] = false;
+            $result['message'] = "Витрина с ID {$companyId} не найдена или неактивна";
+            return $result;
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * Получает информацию о витрине для логирования
+     *
+     * @param int $companyId ID компании
+     * @return string Описание витрины
+     */
+    private function getStorefrontDescription(int $companyId): string
+    {
+        if ($companyId === 0) {
+            return 'Общие категории для всех продавцов';
+        }
+        
+        $config = $this->getStorefrontConfig($companyId);
+        if ($config) {
+            return "Витрина \"{$config['name']}\" (ID: {$companyId})";
+        }
+        
+        return "Витрина с ID {$companyId}";
     }
     
     /**
      * Синхронизирует категории из PIM в CS-Cart
      *
      * @param string $catalogId ID каталога в PIM
-     * @param int|string $companyId ID компании/продавца в CS-Cart
-     * @param int|null $storefrontId ID витрины в CS-Cart (если null, будет использоваться дефолтная)
+     * @param int|string|null $companyId ID компании/продавца в CS-Cart (если null, определится автоматически)
+     * @param int|null $storefrontId ID витрины в CS-Cart (если null, определится автоматически)
      * @return array Результат синхронизации категорий
      */
-    public function syncCategories(string $catalogId, $companyId, ?int $storefrontId = null): array
+    public function syncCategories(string $catalogId, $companyId = null, ?int $storefrontId = null): array
     {
         $result = [
             'total' => 0,
@@ -78,6 +262,25 @@ class PimSyncService
         
         try {
             $this->logger?->log("Начало синхронизации категорий для каталога ID: $catalogId", 'info');
+            
+            // Определяем целевую витрину для каталога
+            $storefrontConfig = $this->getTargetStorefrontForCatalog($catalogId);
+            $targetCompanyId = $companyId ?? $storefrontConfig['company_id'];
+            $targetStorefrontId = $storefrontId ?? $storefrontConfig['storefront_id'];
+            
+            $storefrontDescription = $this->getStorefrontDescription($targetCompanyId);
+            $this->logger?->log("Целевая витрина: {$storefrontDescription} (storefront_id={$targetStorefrontId})", 'info');
+            
+            // Проверяем корректность параметров витрины
+            $validation = $this->validateStorefrontParameters($targetCompanyId, $targetStorefrontId);
+            if (!$validation['valid']) {
+                throw new Exception($validation['message']);
+            }
+            
+            // Проверяем права на синхронизацию
+            if (!$storefrontConfig['sync_categories']) {
+                throw new Exception("Синхронизация категорий отключена для каталога {$catalogId}");
+            }
             
             // Получаем категории из PIM
             $categories = $this->pimClient->getCategories($catalogId);
@@ -92,11 +295,14 @@ class PimSyncService
             $result['total'] = $this->countCategoriesRecursive($rootCategory);
             
             // Получаем существующие категории из CS-Cart для поиска соответствий
-            $existingCategories = $this->getCsCartCategories($companyId, $storefrontId);
+            $existingCategories = $this->getCsCartCategories($targetCompanyId, $targetStorefrontId);
             $syncUidMap = $this->buildSyncUidMap($existingCategories);
             
+            // Загружаем карту маппинга PIM ID -> CS-Cart ID из БД
+            $pimIdMap = $this->buildPimIdToCsCartIdMap($catalogId, $targetCompanyId, $targetStorefrontId);
+            
             // Синхронизируем категории рекурсивно
-            $syncResult = $this->processCategoryTree($rootCategory, 0, $companyId, $storefrontId, $syncUidMap);
+            $syncResult = $this->processCategoryTree($rootCategory, 0, $targetCompanyId, $targetStorefrontId, $syncUidMap, $catalogId, $pimIdMap);
             
             // Обновляем результат
             $result['created'] = $syncResult['created'];
@@ -112,6 +318,288 @@ class PimSyncService
         }
         
         return $result;
+    }
+    
+    /**
+     * Синхронизирует товары из PIM в CS-Cart
+     *
+     * @param array $products Массив товаров из PIM
+     * @param string $catalogId ID каталога в PIM
+     * @param int|string $companyId ID компании в CS-Cart
+     * @param int $storefrontId ID витрины в CS-Cart
+     * @return array Результат синхронизации
+     */
+    private function syncProducts(array $products, string $catalogId, $companyId, int $storefrontId = 1): array
+    {
+        $result = [
+            'total' => count($products),
+            'created' => 0,
+            'updated' => 0,
+            'failed' => 0,
+            'details' => []
+        ];
+        
+        try {
+            $storefrontDescription = $this->getStorefrontDescription($companyId);
+            $this->logger?->log("Начало синхронизации товаров для {$storefrontDescription}. Всего: " . count($products), 'info');
+            
+            // Проверяем корректность параметров витрины
+            $validation = $this->validateStorefrontParameters($companyId, $storefrontId);
+            if (!$validation['valid']) {
+                throw new Exception($validation['message']);
+            }
+            
+            // Загружаем карту маппинга PIM ID категорий -> CS-Cart ID из БД
+            $categoryMap = $this->buildPimIdToCsCartIdMap($catalogId, $companyId, $storefrontId);
+            
+            // Загружаем существующий маппинг товаров
+            $productMap = $this->buildProductPimIdMap($catalogId, $companyId, $storefrontId);
+            
+            foreach ($products as $product) {
+                try {
+                    // Определяем категории товара
+                    $categoryIds = $this->getProductCategories($product, $categoryMap);
+                    
+                    if (empty($categoryIds)) {
+                        $this->logger?->log("Товар {$product['header']} (ID: {$product['id']}) пропущен - нет категорий в CS-Cart", 'warning');
+                        $result['failed']++;
+                        continue;
+                    }
+                    
+                    // Проверяем существование товара
+                    $existingProductId = $productMap[$product['id']] ?? null;
+                    
+                    // Подготавливаем данные товара
+                    $productData = $this->prepareProductData($product, $categoryIds, $companyId, $storefrontId);
+                    
+                    if ($existingProductId) {
+                        // Обновляем существующий товар
+                        $success = $this->updateCsCartProduct($existingProductId, $productData);
+                        
+                        if ($success) {
+                            $result['updated']++;
+                            $this->logger?->log("Обновлен товар: {$product['header']} (CS-Cart ID: $existingProductId)", 'info');
+                        } else {
+                            $result['failed']++;
+                            $this->logger?->log("Ошибка обновления товара: {$product['header']}", 'error');
+                        }
+                    } else {
+                        // Создаем новый товар
+                        $newProductId = $this->createCsCartProduct($productData);
+                        
+                        if ($newProductId) {
+                            $result['created']++;
+                            $this->logger?->log("Создан товар: {$product['header']} (CS-Cart ID: $newProductId)", 'info');
+                            
+                            // Сохраняем маппинг
+                            $this->saveProductMapping($product, $newProductId, $catalogId, $companyId);
+                            $productMap[$product['id']] = $newProductId;
+                        } else {
+                            $result['failed']++;
+                            $this->logger?->log("Ошибка создания товара: {$product['header']}", 'error');
+                        }
+                    }
+                    
+                } catch (Exception $e) {
+                    $result['failed']++;
+                    $this->logger?->log("Ошибка при обработке товара {$product['header']}: " . $e->getMessage(), 'error');
+                }
+            }
+            
+            $this->logger?->log("Завершена синхронизация товаров: создано {$result['created']}, обновлено {$result['updated']}, с ошибками {$result['failed']}", 'info');
+            
+        } catch (Exception $e) {
+            $this->logger?->log("Критическая ошибка при синхронизации товаров: " . $e->getMessage(), 'error');
+            $result['error'] = $e->getMessage();
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * Определяет категории товара на основе catalogAdditional
+     *
+     * @param array $product Товар из PIM
+     * @param array $categoryMap Карта маппинга PIM категорий к CS-Cart
+     * @return array Массив ID категорий в CS-Cart
+     */
+    private function getProductCategories(array $product, array $categoryMap): array
+    {
+        $categoryIds = [];
+        
+        // Проверяем catalogAdditional
+        if (!empty($product['catalogAdditional']) && is_array($product['catalogAdditional'])) {
+            foreach ($product['catalogAdditional'] as $pimCategoryId) {
+                if (isset($categoryMap[$pimCategoryId])) {
+                    $categoryIds[] = $categoryMap[$pimCategoryId];
+                } else {
+                    $this->logger?->log("Категория PIM ID $pimCategoryId не найдена в маппинге для товара {$product['header']}", 'warning');
+                }
+            }
+        }
+        
+        // Если категории не найдены через catalogAdditional, пробуем использовать catalogId
+        if (empty($categoryIds) && !empty($product['catalogId'])) {
+            if (isset($categoryMap[$product['catalogId']])) {
+                $categoryIds[] = $categoryMap[$product['catalogId']];
+            }
+        }
+        
+        return array_unique($categoryIds);
+    }
+    
+    /**
+     * Подготавливает данные товара для CS-Cart
+     *
+     * @param array $product Товар из PIM
+     * @param array $categoryIds ID категорий в CS-Cart
+     * @param int $companyId ID компании в CS-Cart
+     * @param int $storefrontId ID витрины в CS-Cart
+     * @return array Подготовленные данные
+     */
+    private function prepareProductData(array $product, array $categoryIds, int $companyId, int $storefrontId): array
+    {
+        // Базовые данные товара
+        $data = [
+            'product' => $product['header'] ?? '',
+            'product_code' => $product['articul'] ?? '',
+            'status' => $product['enabled'] ? 'A' : 'D',
+            'price' => (float)($product['price'] ?? 0),
+            'amount' => 1000, // По умолчанию большое количество
+            'weight' => (float)($product['weight'] ?? 0),
+            'category_ids' => $categoryIds,
+            'main_category' => reset($categoryIds), // Первая категория как основная
+            'company_id' => $companyId,
+            'storefront_id' => $storefrontId,
+            // Кастомные поля для хранения данных PIM
+            'pim_sync_uid' => $product['syncUid'] ?? '',
+            'pim_id' => $product['id'] ?? ''
+        ];
+        
+        // Добавляем описания если есть
+        if (!empty($product['content'])) {
+            $data['full_description'] = $product['content'];
+        }
+        
+        if (!empty($product['description'])) {
+            $data['short_description'] = $product['description'];
+        }
+        
+        // Штрихкод
+        if (!empty($product['barCode'])) {
+            $data['product_code'] = $product['barCode'];
+        }
+        
+        // Размеры
+        if (!empty($product['width'])) {
+            $data['width'] = (float)$product['width'];
+        }
+        if (!empty($product['height'])) {
+            $data['height'] = (float)$product['height'];
+        }
+        if (!empty($product['length'])) {
+            $data['length'] = (float)$product['length'];
+        }
+        
+        return $data;
+    }
+    
+    /**
+     * Создает новый товар в CS-Cart
+     *
+     * @param array $productData Данные товара
+     * @return int|null ID созданного товара или null при ошибке
+     */
+    private function createCsCartProduct(array $productData): ?int
+    {
+        try {
+            $response = $this->csCartClient->updateProduct($productData);
+            
+            if (isset($response['product_id'])) {
+                return (int)$response['product_id'];
+            }
+            
+            return null;
+        } catch (Exception $e) {
+            $this->logger?->log("Ошибка при создании товара: " . $e->getMessage(), 'error');
+            return null;
+        }
+    }
+    
+    /**
+     * Обновляет существующий товар в CS-Cart
+     *
+     * @param int $productId ID товара в CS-Cart
+     * @param array $productData Данные товара
+     * @return bool Успешность обновления
+     */
+    private function updateCsCartProduct(int $productId, array $productData): bool
+    {
+        try {
+            $response = $this->csCartClient->updateProduct($productData, $productId);
+            
+            return isset($response['product_id']);
+        } catch (Exception $e) {
+            $this->logger?->log("Ошибка при обновлении товара ID $productId: " . $e->getMessage(), 'error');
+            return false;
+        }
+    }
+    
+    /**
+     * Загружает маппинг товаров PIM -> CS-Cart из БД
+     *
+     * @param string $catalogId ID каталога
+     * @param int|string $companyId ID компании
+     * @return array Карта маппинга pim_id => cscart_product_id
+     */
+    private function buildProductPimIdMap(string $catalogId, $companyId, ?int $storefrontId = null): array
+    {
+        $where_conditions = ["catalog_id = ?s", "company_id = ?i"];
+        $params = [$catalogId, $companyId];
+        
+        if ($storefrontId !== null) {
+            $where_conditions[] = "storefront_id = ?i";
+            $params[] = $storefrontId;
+        }
+        
+        $sql = "SELECT pim_id, cscart_product_id FROM ?:pim_sync_product_map WHERE " . implode(' AND ', $where_conditions);
+        
+        $data = db_get_hash_single_array($sql, ['pim_id', 'cscart_product_id'], ...$params);
+        
+        $this->logger?->log("Загружен маппинг товаров PIM->CS-Cart: " . count($data) . " записей", 'debug');
+        
+        return $data;
+    }
+    
+    /**
+     * Сохраняет маппинг товара PIM -> CS-Cart в БД
+     *
+     * @param array $product Товар из PIM
+     * @param int $csCartProductId ID товара в CS-Cart
+     * @param string $catalogId ID каталога
+     * @param int|string $companyId ID компании
+     * @return bool
+     */
+    private function saveProductMapping(array $product, int $csCartProductId, string $catalogId, $companyId): bool
+    {
+        $data = [
+            'pim_id' => $product['id'],
+            'pim_sync_uid' => $product['syncUid'],
+            'cscart_product_id' => $csCartProductId,
+            'catalog_id' => $catalogId,
+            'company_id' => $companyId,
+            'timestamp' => TIME
+        ];
+        
+        $result = db_replace_into('pim_sync_product_map', $data);
+        
+        if ($result) {
+            $this->logger?->log("Сохранен маппинг товара PIM ID {$product['id']} -> CS-Cart ID $csCartProductId", 'debug');
+        } else {
+            $this->logger?->log("Ошибка сохранения маппинга товара PIM ID {$product['id']}", 'error');
+        }
+        
+        return (bool)$result;
     }
 
     /**
@@ -198,6 +686,68 @@ class PimSyncService
         
         return $map;
     }
+    
+    /**
+     * Строит карту соответствия PIM ID к CS-Cart ID категорий из БД
+     *
+     * @param string $catalogId ID каталога в PIM
+     * @param int|string $companyId ID компании
+     * @param int|null $storefrontId ID витрины
+     * @return array Карта соответствия pim_id => cscart_category_id
+     */
+    private function buildPimIdToCsCartIdMap(string $catalogId, $companyId, ?int $storefrontId = null): array
+    {
+        $condition = "catalog_id = ?s AND company_id = ?i";
+        $params = [$catalogId, $companyId];
+        
+        if ($storefrontId !== null) {
+            $condition .= " AND storefront_id = ?i";
+            $params[] = $storefrontId;
+        }
+        
+        $data = db_get_hash_single_array(
+            "SELECT pim_id, cscart_category_id FROM ?:pim_sync_category_map WHERE $condition",
+            ['pim_id', 'cscart_category_id'],
+            ...$params
+        );
+        
+        $this->logger?->log("Загружена карта маппинга PIM->CS-Cart для каталога $catalogId: " . count($data) . " записей", 'debug');
+        
+        return $data;
+    }
+    
+    /**
+     * Сохраняет маппинг категории PIM -> CS-Cart в БД
+     *
+     * @param array $category Категория из PIM
+     * @param int $csCartCategoryId ID категории в CS-Cart
+     * @param string $catalogId ID каталога в PIM
+     * @param int|string $companyId ID компании
+     * @param int|null $storefrontId ID витрины
+     * @return bool
+     */
+    private function saveCategoryMapping(array $category, int $csCartCategoryId, string $catalogId, $companyId, ?int $storefrontId = null): bool
+    {
+        $data = [
+            'pim_id' => $category['id'],
+            'pim_sync_uid' => $category['syncUid'],
+            'cscart_category_id' => $csCartCategoryId,
+            'catalog_id' => $catalogId,
+            'company_id' => $companyId,
+            'storefront_id' => $storefrontId ?: 0,
+            'timestamp' => TIME
+        ];
+        
+        $result = db_replace_into('pim_sync_category_map', $data);
+        
+        if ($result) {
+            $this->logger?->log("Сохранен маппинг категории PIM ID {$category['id']} -> CS-Cart ID $csCartCategoryId", 'debug');
+        } else {
+            $this->logger?->log("Ошибка сохранения маппинга категории PIM ID {$category['id']}", 'error');
+        }
+        
+        return (bool)$result;
+    }
 
     /**
      * Обрабатывает дерево категорий и синхронизирует их с CS-Cart
@@ -207,9 +757,11 @@ class PimSyncService
      * @param int|string $companyId ID компании в CS-Cart
      * @param int|null $storefrontId ID витрины в CS-Cart
      * @param array $syncUidMap Карта соответствия syncUid => category
+     * @param string $catalogId ID каталога в PIM
+     * @param array $pimIdMap Карта соответствия PIM ID => CS-Cart ID
      * @return array Результат синхронизации
      */
-    private function processCategoryTree(array $category, int $parentId, $companyId, ?int $storefrontId, array $syncUidMap): array
+    private function processCategoryTree(array $category, int $parentId, $companyId, ?int $storefrontId, array $syncUidMap, string $catalogId, array &$pimIdMap): array
     {
         $result = [
             'created' => 0,
@@ -219,136 +771,130 @@ class PimSyncService
         ];
 
         try {
-            // Пропускаем корневую категорию каталога, если это нужно
-            if (isset($category['level']) && $category['level'] <= 2 && empty($parentId)) {
+            // Проверяем, нужно ли пропустить эту категорию
+            // Пропускаем только если это корневая категория каталога (level = 2 и parentId = 0)
+            $shouldSkipCategory = false;
+            if (isset($category['level']) && $category['level'] == 2 && $parentId == 0) {
+                $shouldSkipCategory = true;
                 $this->logger?->log("Пропускаем корневую категорию каталога: {$category['header']}", 'info');
+            }
+
+            $csCartCategoryId = null;
+            
+            if (!$shouldSkipCategory) {
+                // Проверяем существование категории по syncUid
+                $existingCategory = isset($syncUidMap[$category['syncUid']]) ? $syncUidMap[$category['syncUid']] : null;
                 
-                // Рекурсивно обрабатываем только дочерние категории
-                if (!empty($category['children'])) {
-                    foreach ($category['children'] as $childCategory) {
-                        $childResult = $this->processCategoryTree(
-                            $childCategory, 
-                            0, // для дочерних корневой категории используем 0 как parentId
-                            $companyId,
-                            $storefrontId,
-                            $syncUidMap
-                        );
-                        
-                        // Обновляем общий результат
-                        $result['created'] += $childResult['created'];
-                        $result['updated'] += $childResult['updated'];
-                        $result['failed'] += $childResult['failed'];
-                        $result['details'] = array_merge($result['details'], $childResult['details']);
-                    }
+                // Формируем данные для CS-Cart
+                $categoryData = [
+                    'category' => $category['header'],
+                    'company_id' => $companyId,
+                    'status' => $category['enabled'] ? 'A' : 'D',
+                    'position' => $category['pos'] ?? 0,
+                    'parent_id' => $parentId,
+                    'description' => $category['content'] ?? '',
+                    'meta_keywords' => $category['htKeywords'] ?? '',
+                    'meta_description' => $category['htDesc'] ?? '',
+                    'page_title' => $category['htHead'] ?? '',
+                    // Добавляем кастомные поля для хранения данных из PIM
+                    self::PIM_SYNC_UID_FIELD => $category['syncUid'],
+                    self::PIM_ID_FIELD => $category['id']
+                ];
+                
+                // Если есть storefront_id, добавляем его
+                if ($storefrontId) {
+                    $categoryData['storefront_id'] = $storefrontId;
                 }
                 
-                return $result;
-            }
-            
-            // Проверяем существование категории по syncUid
-            $existingCategory = isset($syncUidMap[$category['syncUid']]) ? $syncUidMap[$category['syncUid']] : null;
-            
-            // Формируем данные для CS-Cart
-            $categoryData = [
-                'category' => $category['header'],
-                'company_id' => $companyId,
-                'status' => $category['enabled'] ? 'A' : 'D',
-                'position' => $category['pos'] ?? 0,
-                'description' => $category['content'] ?? '',
-                'meta_keywords' => $category['htKeywords'] ?? '',
-                'meta_description' => $category['htDesc'] ?? '',
-                'page_title' => $category['htHead'] ?? '',
-                // Добавляем кастомные поля для хранения данных из PIM
-                self::PIM_SYNC_UID_FIELD => $category['syncUid'],
-                self::PIM_ID_FIELD => $category['id']
-            ];
-            
-            // Если есть storefront_id, добавляем его
-            if ($storefrontId !== null) {
-                $categoryData['storefront_id'] = $storefrontId;
-            }
-            
-            // Генерируем SEO имя
-            $categoryData['seo_name'] = $this->generateSeoName($category['header']);
-            
-            // Устанавливаем родительскую категорию
-            if ($parentId > 0) {
-                $categoryData['parent_id'] = $parentId;
-            }
-            
-            $this->logger?->log("Подготовлены данные для категории: {$category['header']}", 'debug');
-
-            $csCartCategoryId = 0;
-            $action = '';
-            
-            if ($existingCategory) {
-                // Обновляем существующую категорию
-                $csCartCategoryId = (int)$existingCategory['category_id'];
-                $this->logger?->log("Найдена существующая категория по syncUid {$category['syncUid']}, CS-Cart ID: $csCartCategoryId", 'info');
+                $action = '';
                 
-                // Обновляем категорию через API
-                try {
-                    $success = $this->updateCsCartCategory($csCartCategoryId, $categoryData);
+                if ($existingCategory) {
+                    // Обновляем существующую категорию
+                    $csCartCategoryId = $existingCategory['category_id'];
+                    $this->logger?->log("Обновление существующей категории: {$category['header']} (ID: $csCartCategoryId)", 'info');
                     
-                    if ($success) {
-                        $result['updated']++;
-                        $action = 'updated';
-                        $this->logger?->log("Обновлена категория: {$category['header']} (ID: $csCartCategoryId)", 'info');
-                    } else {
+                    try {
+                        $updateResult = $this->updateCsCartCategory($csCartCategoryId, $categoryData);
+                        
+                        if ($updateResult) {
+                            $result['updated']++;
+                            $action = 'updated';
+                            $this->logger?->log("Обновлена категория: {$category['header']} (ID: $csCartCategoryId)", 'info');
+                            
+                            // Сохраняем маппинг в БД
+                            $this->saveCategoryMapping($category, $csCartCategoryId, $catalogId, $companyId, $storefrontId);
+                            
+                            // Обновляем карту маппинга в памяти
+                            $pimIdMap[$category['id']] = $csCartCategoryId;
+                        } else {
+                            $result['failed']++;
+                            $action = 'update_failed';
+                            $this->logger?->log("Не удалось обновить категорию: {$category['header']} (ID: $csCartCategoryId)", 'warning');
+                        }
+                    } catch (Exception $e) {
                         $result['failed']++;
                         $action = 'update_failed';
-                        $this->logger?->log("Не удалось обновить категорию: {$category['header']} (ID: $csCartCategoryId)", 'warning');
+                        $this->logger?->log("Ошибка при обновлении категории {$category['header']} (ID: $csCartCategoryId): " . $e->getMessage(), 'error');
                     }
-                } catch (Exception $e) {
-                    $result['failed']++;
-                    $action = 'update_failed';
-                    $this->logger?->log("Ошибка при обновлении категории {$category['header']} (ID: $csCartCategoryId): " . $e->getMessage(), 'error');
-                }
-            } else {
-                // Создаем новую категорию через API
-                $this->logger?->log("Создание новой категории: {$category['header']}", 'info');
-                
-                try {
-                    $csCartCategoryId = $this->createCsCartCategory($categoryData);
+                } else {
+                    // Создаем новую категорию через API
+                    $this->logger?->log("Создание новой категории: {$category['header']}", 'info');
                     
-                    if ($csCartCategoryId) {
-                        $result['created']++;
-                        $action = 'created';
-                        $this->logger?->log("Создана категория: {$category['header']} (ID: $csCartCategoryId)", 'info');
+                    try {
+                        $csCartCategoryId = $this->createCsCartCategory($categoryData);
                         
-                        // Добавляем созданную категорию в карту соответствия
-                        $categoryData['category_id'] = $csCartCategoryId;
-                        $syncUidMap[$category['syncUid']] = $categoryData;
-                    } else {
+                        if ($csCartCategoryId) {
+                            $result['created']++;
+                            $action = 'created';
+                            $this->logger?->log("Создана категория: {$category['header']} (ID: $csCartCategoryId)", 'info');
+                            
+                            // Добавляем созданную категорию в карту соответствия
+                            $categoryData['category_id'] = $csCartCategoryId;
+                            $syncUidMap[$category['syncUid']] = $categoryData;
+                            
+                            // Сохраняем маппинг в БД
+                            $this->saveCategoryMapping($category, $csCartCategoryId, $catalogId, $companyId, $storefrontId);
+                            
+                            // Обновляем карту маппинга в памяти
+                            $pimIdMap[$category['id']] = $csCartCategoryId;
+                        } else {
+                            $result['failed']++;
+                            $action = 'create_failed';
+                            $this->logger?->log("Не удалось создать категорию: {$category['header']}", 'warning');
+                        }
+                    } catch (Exception $e) {
                         $result['failed']++;
                         $action = 'create_failed';
-                        $this->logger?->log("Не удалось создать категорию: {$category['header']}", 'warning');
+                        $this->logger?->log("Ошибка при создании категории {$category['header']}: " . $e->getMessage(), 'error');
                     }
-                } catch (Exception $e) {
-                    $result['failed']++;
-                    $action = 'create_failed';
-                    $this->logger?->log("Ошибка при создании категории {$category['header']}: " . $e->getMessage(), 'error');
+                }
+                
+                // Добавляем информацию о результате
+                if ($action) {
+                    $result['details'][] = [
+                        'action' => $action,
+                        'pim_id' => $category['id'],
+                        'pim_header' => $category['header'],
+                        'cscart_id' => $csCartCategoryId,
+                        'parent_id' => $parentId
+                    ];
                 }
             }
             
-            // Добавляем информацию о результате
-            $result['details'][] = [
-                'action' => $action,
-                'pim_id' => $category['id'],
-                'pim_header' => $category['header'],
-                'cscart_id' => $csCartCategoryId,
-                'parent_id' => $parentId
-            ];
-            
             // Рекурсивно обрабатываем дочерние категории
-            if (!empty($category['children']) && $csCartCategoryId) {
+            if (!empty($category['children'])) {
                 foreach ($category['children'] as $childCategory) {
+                    // Определяем правильный parentId для дочерней категории
+                    $childParentId = $shouldSkipCategory ? $parentId : $csCartCategoryId;
+                    
                     $childResult = $this->processCategoryTree(
                         $childCategory, 
-                        $csCartCategoryId,
+                        $childParentId,
                         $companyId,
                         $storefrontId,
-                        $syncUidMap
+                        $syncUidMap,
+                        $catalogId,
+                        $pimIdMap
                     );
                     
                     // Обновляем общий результат
@@ -358,7 +904,7 @@ class PimSyncService
                     $result['details'] = array_merge($result['details'], $childResult['details']);
                 }
             }
-            
+
         } catch (Exception $e) {
             $this->logger?->log("Ошибка при обработке категории {$category['header']}: " . $e->getMessage(), 'error');
             $result['failed']++;
@@ -382,19 +928,58 @@ class PimSyncService
     private function createCsCartCategory(array $categoryData): ?int
     {
         try {
+            // Валидация обязательных полей
+            if (empty($categoryData['category'])) {
+                throw new Exception('Отсутствует обязательное поле "category"');
+            }
+            
+            // Проверяем, что parent_id существует (если указан)
+            if (!empty($categoryData['parent_id']) && $categoryData['parent_id'] > 0) {
+                if (!$this->categoryExists($categoryData['parent_id'])) {
+                    throw new Exception("Родительская категория с ID {$categoryData['parent_id']} не найдена");
+                }
+            }
+            
             $this->logger?->log("Создание категории через CS-Cart API: {$categoryData['category']}", 'debug');
+            $this->logger?->log("Данные категории: " . json_encode($categoryData, JSON_UNESCAPED_UNICODE), 'debug');
+            
             $response = $this->csCartClient->makeRequest('/api/2.0/categories', 'POST', $categoryData);
             
             if (isset($response['category_id'])) {
-                $this->logger?->log("CS-Cart API вернул ID созданной категории: {$response['category_id']}", 'debug');
-                return (int)$response['category_id'];
+                $categoryId = (int)$response['category_id'];
+                $this->logger?->log("CS-Cart API вернул ID созданной категории: {$categoryId}", 'debug');
+                
+                // Проверяем, что категория действительно создана
+                if ($this->categoryExists($categoryId)) {
+                    return $categoryId;
+                } else {
+                    throw new Exception("Категория была создана, но не найдена при проверке");
+                }
             }
             
             $this->logger?->log("CS-Cart API не вернул ID категории при создании", 'warning');
+            $this->logger?->log("Ответ API: " . json_encode($response, JSON_UNESCAPED_UNICODE), 'debug');
             return null;
         } catch (Exception $e) {
             $this->logger?->log("Ошибка при создании категории {$categoryData['category']}: " . $e->getMessage(), 'error');
             return null;
+        }
+    }
+
+    /**
+     * Проверяет существование категории в CS-Cart
+     *
+     * @param int $categoryId ID категории
+     * @return bool true если категория существует
+     */
+    private function categoryExists(int $categoryId): bool
+    {
+        try {
+            $response = $this->csCartClient->makeRequest("/api/2.0/categories/{$categoryId}", 'GET');
+            return isset($response['category_id']);
+        } catch (Exception $e) {
+            $this->logger?->log("Ошибка при проверке существования категории ID {$categoryId}: " . $e->getMessage(), 'debug');
+            return false;
         }
     }
 
@@ -408,7 +993,26 @@ class PimSyncService
     private function updateCsCartCategory(int $categoryId, array $categoryData): bool
     {
         try {
+            // Проверяем, что категория существует
+            if (!$this->categoryExists($categoryId)) {
+                throw new Exception("Категория с ID {$categoryId} не найдена");
+            }
+            
+            // Валидация обязательных полей
+            if (empty($categoryData['category'])) {
+                throw new Exception('Отсутствует обязательное поле "category"');
+            }
+            
+            // Проверяем, что parent_id существует (если указан)
+            if (!empty($categoryData['parent_id']) && $categoryData['parent_id'] > 0) {
+                if (!$this->categoryExists($categoryData['parent_id'])) {
+                    throw new Exception("Родительская категория с ID {$categoryData['parent_id']} не найдена");
+                }
+            }
+            
             $this->logger?->log("Обновление категории через CS-Cart API, ID: $categoryId", 'debug');
+            $this->logger?->log("Данные для обновления: " . json_encode($categoryData, JSON_UNESCAPED_UNICODE), 'debug');
+            
             $response = $this->csCartClient->makeRequest("/api/2.0/categories/{$categoryId}", 'PUT', $categoryData);
             
             $success = isset($response['category_id']);
@@ -416,6 +1020,7 @@ class PimSyncService
                 $this->logger?->log("Категория успешно обновлена в CS-Cart, ID: $categoryId", 'debug');
             } else {
                 $this->logger?->log("CS-Cart API не вернул ID категории при обновлении", 'warning');
+                $this->logger?->log("Ответ API: " . json_encode($response, JSON_UNESCAPED_UNICODE), 'debug');
             }
             
             return $success;
@@ -508,9 +1113,14 @@ class PimSyncService
         try {
             $this->logger?->log("Начало синхронизации каталога ID: $catalogId, тип: $syncType", 'info');
             
+            // Определяем целевую витрину для каталога
+            $storefrontConfig = $this->getTargetStorefrontForCatalog($catalogId);
+            $targetCompanyId = $storefrontConfig['company_id'];
+            $targetStorefrontId = $storefrontConfig['storefront_id'];
+            
             // 1. Синхронизация категорий
             $this->logger?->log("Начало синхронизации категорий из PIM", 'info');
-            $categoriesResult = $this->syncCategories($catalogId, $this->companyId);
+            $categoriesResult = $this->syncCategories($catalogId, $targetCompanyId);
             
             $result['categories'] = [
                 'total' => $categoriesResult['total'],
@@ -533,7 +1143,15 @@ class PimSyncService
                 $result['products']['total'] = count($products);
                 $this->logger?->log("Получено продуктов из PIM: " . count($products), 'info');
                 
-                // TODO: Здесь будет код для обработки продуктов
+                // Синхронизируем продукты
+                $productsResult = $this->syncProducts($products, $catalogId, $targetCompanyId, $targetStorefrontId);
+                
+                $result['products'] = [
+                    'total' => $productsResult['total'],
+                    'created' => $productsResult['created'],
+                    'updated' => $productsResult['updated'],
+                    'failed' => $productsResult['failed']
+                ];
             }
             
             $result['status'] = 'completed';

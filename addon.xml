@@ -182,6 +182,79 @@
 
     <!-- Дополнительные запросы к базе данных -->
     <queries>
+        <!-- Создание таблиц для маппинга -->
+        <item for="install">
+            CREATE TABLE IF NOT EXISTS `?:pim_sync_category_map` (
+                `map_id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+                `pim_id` varchar(128) NOT NULL,
+                `pim_sync_uid` varchar(128) NOT NULL,
+                `cscart_category_id` mediumint(8) unsigned NOT NULL,
+                `catalog_id` varchar(32) NOT NULL,
+                `company_id` int(11) unsigned NOT NULL DEFAULT '0',
+                `storefront_id` int(11) unsigned NOT NULL DEFAULT '0',
+                `timestamp` int(11) unsigned NOT NULL DEFAULT '0',
+                PRIMARY KEY (`map_id`),
+                UNIQUE KEY `idx_pim_cscart` (`pim_id`, `catalog_id`, `company_id`, `storefront_id`),
+                KEY `idx_cscart_category` (`cscart_category_id`),
+                KEY `idx_sync_uid` (`pim_sync_uid`)
+            ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+        </item>
+        
+        <item for="install">
+            CREATE TABLE IF NOT EXISTS `?:pim_sync_product_map` (
+                `map_id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+                `pim_id` varchar(128) NOT NULL,
+                `pim_sync_uid` varchar(128) NOT NULL,
+                `cscart_product_id` mediumint(8) unsigned NOT NULL,
+                `catalog_id` varchar(32) NOT NULL,
+                `company_id` int(11) unsigned NOT NULL DEFAULT '0',
+                `timestamp` int(11) unsigned NOT NULL DEFAULT '0',
+                PRIMARY KEY (`map_id`),
+                UNIQUE KEY `idx_pim_cscart` (`pim_id`, `catalog_id`, `company_id`),
+                KEY `idx_cscart_product` (`cscart_product_id`),
+                KEY `idx_sync_uid` (`pim_sync_uid`)
+            ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+        </item>
+        
+        <item for="install">
+            CREATE TABLE IF NOT EXISTS `?:pim_sync_history` (
+                `history_id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+                `sync_type` enum('full','delta','manual') NOT NULL DEFAULT 'manual',
+                `entity_type` enum('category','product','all') NOT NULL DEFAULT 'all',
+                `catalog_id` varchar(32) NOT NULL,
+                `company_id` int(11) unsigned NOT NULL DEFAULT '0',
+                `storefront_id` int(11) unsigned NOT NULL DEFAULT '0',
+                `start_time` int(11) unsigned NOT NULL DEFAULT '0',
+                `end_time` int(11) unsigned NOT NULL DEFAULT '0',
+                `status` enum('started','completed','failed') NOT NULL DEFAULT 'started',
+                `stats` text,
+                `error_message` text,
+                PRIMARY KEY (`history_id`),
+                KEY `idx_catalog` (`catalog_id`),
+                KEY `idx_company` (`company_id`)
+            ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+        </item>
+        
+        <!-- Связь каталог PIM -> витрина CS-Cart -->
+        <item for="install">
+            CREATE TABLE IF NOT EXISTS `?:pim_sync_catalog_storefront` (
+                `link_id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+                `pim_catalog_id` varchar(32) NOT NULL,
+                `company_id` int(11) unsigned NOT NULL DEFAULT '0',
+                `storefront_id` int(11) unsigned NOT NULL DEFAULT '0',
+                `status` char(1) NOT NULL DEFAULT 'A',
+                `timestamp` int(11) unsigned NOT NULL DEFAULT '0',
+                PRIMARY KEY (`link_id`),
+                UNIQUE KEY `idx_catalog_storefront` (`pim_catalog_id`, `company_id`, `storefront_id`)
+            ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+        </item>
+        
+        <!-- Удаление таблиц при деинсталляции -->
+        <item for="uninstall">DROP TABLE IF EXISTS `?:pim_sync_category_map`</item>
+        <item for="uninstall">DROP TABLE IF EXISTS `?:pim_sync_product_map`</item>
+        <item for="uninstall">DROP TABLE IF EXISTS `?:pim_sync_history`</item>
+        <item for="uninstall">DROP TABLE IF EXISTS `?:pim_sync_catalog_storefront`</item>
+        
         <!-- Добавление привилегий -->
         <item for="install">
             INSERT IGNORE INTO `?:privileges` (`privilege`, `is_default`, `section_id`, `group_id`, `is_view`) 

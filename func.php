@@ -24,7 +24,51 @@ use Tygh\Registry;
  */
 function fn_pim_sync_install()
 {
-    fn_pim_sync_log('PIM Sync addon installed successfully', 'info');
+    // Создаем таблицы для маппинга категорий и продуктов
+    
+    // Таблица для маппинга категорий PIM <-> CS-Cart
+    $sql = "CREATE TABLE IF NOT EXISTS ?:pim_sync_category_map (
+        `id` int(11) NOT NULL AUTO_INCREMENT,
+        `pim_id` int(11) NOT NULL COMMENT 'ID категории в PIM',
+        `pim_sync_uid` varchar(255) NOT NULL COMMENT 'syncUid категории из PIM',
+        `cscart_category_id` int(11) NOT NULL COMMENT 'ID категории в CS-Cart',
+        `catalog_id` varchar(255) NOT NULL COMMENT 'ID каталога в PIM',
+        `company_id` int(11) NOT NULL DEFAULT '0' COMMENT 'ID компании в CS-Cart',
+        `storefront_id` int(11) NOT NULL DEFAULT '0' COMMENT 'ID витрины в CS-Cart',
+        `timestamp` int(11) NOT NULL DEFAULT '0' COMMENT 'Время последней синхронизации',
+        PRIMARY KEY (`id`),
+        UNIQUE KEY `pim_sync_uid` (`pim_sync_uid`, `catalog_id`, `company_id`, `storefront_id`),
+        KEY `pim_id` (`pim_id`),
+        KEY `cscart_category_id` (`cscart_category_id`),
+        KEY `catalog_id` (`catalog_id`),
+        KEY `company_id` (`company_id`),
+        KEY `storefront_id` (`storefront_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci COMMENT='Маппинг категорий PIM <-> CS-Cart';";
+    
+    db_query($sql);
+    
+    // Таблица для маппинга продуктов PIM <-> CS-Cart
+    $sql = "CREATE TABLE IF NOT EXISTS ?:pim_sync_product_map (
+        `id` int(11) NOT NULL AUTO_INCREMENT,
+        `pim_id` int(11) NOT NULL COMMENT 'ID продукта в PIM',
+        `pim_sync_uid` varchar(255) NOT NULL COMMENT 'syncUid продукта из PIM',
+        `cscart_product_id` int(11) NOT NULL COMMENT 'ID продукта в CS-Cart',
+        `catalog_id` varchar(255) NOT NULL COMMENT 'ID каталога в PIM',
+        `company_id` int(11) NOT NULL DEFAULT '0' COMMENT 'ID компании в CS-Cart',
+        `storefront_id` int(11) NOT NULL DEFAULT '0' COMMENT 'ID витрины в CS-Cart',
+        `timestamp` int(11) NOT NULL DEFAULT '0' COMMENT 'Время последней синхронизации',
+        PRIMARY KEY (`id`),
+        UNIQUE KEY `pim_sync_uid` (`pim_sync_uid`, `catalog_id`, `company_id`, `storefront_id`),
+        KEY `pim_id` (`pim_id`),
+        KEY `cscart_product_id` (`cscart_product_id`),
+        KEY `catalog_id` (`catalog_id`),
+        KEY `company_id` (`company_id`),
+        KEY `storefront_id` (`storefront_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci COMMENT='Маппинг продуктов PIM <-> CS-Cart';";
+    
+    db_query($sql);
+    
+    fn_pim_sync_log('PIM Sync addon installed successfully with database tables', 'info');
     return true;
 }
 
@@ -33,8 +77,12 @@ function fn_pim_sync_install()
  */
 function fn_pim_sync_uninstall()
 {
+    // Удаляем таблицы аддона
+    db_query("DROP TABLE IF EXISTS ?:pim_sync_category_map");
+    db_query("DROP TABLE IF EXISTS ?:pim_sync_product_map");
+    
     // Прямая запись в системный лог CS-Cart без использования классов аддона
-    fn_log_event('pim_sync', 'info', ['message' => 'PIM Sync addon uninstalled']);
+    fn_log_event('pim_sync', 'info', ['message' => 'PIM Sync addon uninstalled with database tables removed']);
     return true;
 }
 
@@ -171,5 +219,6 @@ function fn_pim_sync_get_sync_service($company_id = 0)
     
     // Создаем и возвращаем сервис синхронизации
     // Примечание: Класс PimSyncService должен быть создан отдельно
-    return new Tygh\Addons\PimSync\PimSyncService($pim_client, $cs_cart_client, $company_id);
+    $storefront_id = Registry::get('runtime.storefront_id') ?: 1;
+    return new Tygh\Addons\PimSync\PimSyncService($pim_client, $cs_cart_client, $company_id, $storefront_id);
 }

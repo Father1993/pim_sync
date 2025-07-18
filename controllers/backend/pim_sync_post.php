@@ -21,6 +21,53 @@ use Tygh\Registry;
 use Tygh\Addons\PimSync\Api\PimApiClient;
 use Tygh\Addons\PimSync\Exception\ApiAuthException;
 
+// Валидация базовых параметров
+if (!defined('AREA') || AREA !== 'A') {
+    die('Access denied: Admin area only');
+}
+
+// Проверка прав доступа
+if (!fn_check_permissions('pim_sync', 'pim_sync_post', 'admin')) {
+    die('Access denied: Insufficient permissions');
+}
+
+// Валидация CSRF токена
+if (!fn_is_csrf_token_valid()) {
+    fn_set_notification('E', __('error'), __('csrf_token_invalid'));
+    return [CONTROLLER_STATUS_REDIRECT, 'pim_sync.manage'];
+}
+
+/**
+ * Валидация входных данных
+ */
+function fn_pim_sync_validate_input($required_fields = [], $optional_fields = [])
+{
+    $validated_data = [];
+    
+    // Проверка обязательных полей
+    foreach ($required_fields as $field) {
+        if (!isset($_POST[$field]) || empty($_POST[$field])) {
+            fn_set_notification('E', __('error'), __('pim_sync.required_field_missing', ['field' => $field]));
+            return false;
+        }
+        $validated_data[$field] = trim($_POST[$field]);
+    }
+    
+    // Проверка необязательных полей
+    foreach ($optional_fields as $field) {
+        if (isset($_POST[$field])) {
+            $validated_data[$field] = trim($_POST[$field]);
+        }
+    }
+    
+    // Защита от XSS
+    foreach ($validated_data as $key => $value) {
+        $validated_data[$key] = fn_strip_tags($value);
+    }
+    
+    return $validated_data;
+}
+
 // Обработка различных POST запросов
 switch ($mode) {
     case 'test_connection':
@@ -48,6 +95,12 @@ switch ($mode) {
  */
 function fn_pim_sync_process_test_connection()
 {
+    // Валидация входных данных
+    $validated_data = fn_pim_sync_validate_input();
+    if ($validated_data === false) {
+        return [CONTROLLER_STATUS_REDIRECT, 'pim_sync.manage'];
+    }
+    
     try {
         // Логируем начало процесса тестирования
         if (function_exists('fn_log_event')) {
@@ -163,6 +216,12 @@ function fn_pim_sync_process_test_connection()
  */
 function fn_pim_sync_process_sync_full()
 {
+    // Валидация входных данных
+    $validated_data = fn_pim_sync_validate_input();
+    if ($validated_data === false) {
+        return [CONTROLLER_STATUS_REDIRECT, 'pim_sync.manage'];
+    }
+    
     try {
         fn_pim_sync_log_empty_line();
         fn_pim_sync_log('=== НАЧАЛО ПОЛНОЙ СИНХРОНИЗАЦИИ ===', 'info');
@@ -215,8 +274,20 @@ function fn_pim_sync_process_sync_full()
  */
 function fn_pim_sync_process_sync_delta()
 {
+    // Валидация входных данных
+    $validated_data = fn_pim_sync_validate_input([], ['days']);
+    if ($validated_data === false) {
+        return [CONTROLLER_STATUS_REDIRECT, 'pim_sync.manage'];
+    }
+    
     try {
-        $days = isset($_POST['days']) ? (int)$_POST['days'] : 1;
+        $days = isset($validated_data['days']) ? (int)$validated_data['days'] : 1;
+        // Дополнительная валидация параметра days
+        if ($days < 1 || $days > 365) {
+            fn_set_notification('E', __('error'), 'Неверное значение дней для дельта синхронизации (1-365)');
+            return [CONTROLLER_STATUS_REDIRECT, 'pim_sync.manage'];
+        }
+        
         fn_pim_sync_log_empty_line();
         fn_pim_sync_log("=== НАЧАЛО ДЕЛЬТА СИНХРОНИЗАЦИИ (последние $days дней) ===", 'info');
         
@@ -268,7 +339,13 @@ function fn_pim_sync_process_sync_delta()
  */
 function fn_pim_sync_process_clear_logs()
 {
-    $action = isset($_POST['action']) ? $_POST['action'] : '';
+    // Валидация входных данных
+    $validated_data = fn_pim_sync_validate_input([], ['action']);
+    if ($validated_data === false) {
+        return [CONTROLLER_STATUS_REDIRECT, 'pim_sync.manage'];
+    }
+    
+    $action = isset($validated_data['action']) ? $validated_data['action'] : '';
     
     try {
         if ($action == 'clear_all') {

@@ -121,6 +121,26 @@ class PimApiClient extends BaseApiClient
     }
     
     /**
+     * Получает список всех каталогов из PIM
+     *
+     * @param array $params Дополнительные параметры
+     * @return array Список каталогов
+     * @throws Exception
+     */
+    public function getCatalogs(array $params = []): array
+    {
+        $endpoint = '/catalog';
+        if (!empty($params)) {
+            $endpoint .= '?' . http_build_query($params);
+        }
+        $response = $this->makeRequest($endpoint, 'GET');
+        if (isset($response['data']) && $response['success'] === true) {
+            return $response['data'];
+        }
+        return $response;
+    }
+
+    /**
      * Получает список категорий из PIM
      *
      * @param string|null $scope ID каталога
@@ -128,21 +148,31 @@ class PimApiClient extends BaseApiClient
      * @return array Список категорий
      * @throws Exception
      */
-        public function getCategories(?string $scope = null, array $params = []): array
-        {
-            if ($scope === null) {
-                throw new ApiAuthException('Catalog ID is required for PIM API', 400);
-            }
-            $endpoint = '/catalog/' . $scope;
-            if (!empty($params)) {
-                $endpoint .= '?' . http_build_query($params);
-            }
-            $response = $this->makeRequest($endpoint, 'GET');
-            if (isset($response['data']) && $response['success'] === true) {
-                return $response['data'];
-            }
-            return $response;
+    public function getCategories(?string $scope = null, array $params = []): array
+    {
+        if ($scope === null) {
+            throw new ApiAuthException('Catalog ID is required for PIM API', 400);
         }
+        
+        // Сначала получаем все каталоги
+        $catalogs = $this->getCatalogs($params);
+        
+        // Находим нужный каталог по ID
+        $targetCatalog = null;
+        foreach ($catalogs as $catalog) {
+            if ($catalog['id'] == $scope) {
+                $targetCatalog = $catalog;
+                break;
+            }
+        }
+        
+        if ($targetCatalog === null) {
+            throw new Exception("Каталог с ID {$scope} не найден");
+        }
+        
+        // Возвращаем найденный каталог как массив (для совместимости с существующим кодом)
+        return [$targetCatalog];
+    }
 
     
     /**
