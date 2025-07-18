@@ -78,21 +78,26 @@ class PimSyncService
         try {
             $this->logger?->log('Загрузка конфигурации витрин из CS-Cart', 'info');
             
-            // Получаем список всех витрин/продавцов
-            $response = $this->csCartClient->get('/api/2.0/vendors');
+            // Получаем список всех компаний напрямую из БД
+            $companies = db_get_array(
+                "SELECT company_id, company as name, status, email 
+                 FROM ?:companies 
+                 WHERE status = 'A' 
+                 ORDER BY company_id"
+            );
             
-            if (!empty($response['stores'])) {
-                foreach ($response['stores'] as $store) {
-                    $this->storefrontConfig[$store['company_id']] = [
-                        'company_id' => $store['company_id'],
-                        'name' => $store['company'],
-                        'seo_name' => $store['seo_name'],
-                        'status' => $store['status'],
-                        'email' => $store['email'] ?? ''
+            if (!empty($companies)) {
+                foreach ($companies as $company) {
+                    $this->storefrontConfig[$company['company_id']] = [
+                        'company_id' => $company['company_id'],
+                        'name' => $company['name'],
+                        'seo_name' => strtolower(str_replace(' ', '_', $company['name'])),
+                        'status' => $company['status'],
+                        'email' => $company['email'] ?? ''
                     ];
                 }
                 
-                $this->logger?->log('Загружено витрин: ' . count($this->storefrontConfig), 'info');
+                $this->logger?->log('Загружено компаний: ' . count($this->storefrontConfig), 'info');
             }
             
         } catch (Exception $e) {
