@@ -87,6 +87,17 @@ switch ($mode) {
         }
         break;
         
+    case 'sync_category_tree':
+        if ($is_post_request) {
+            // Обработка POST для синхронизации дерева категорий
+            fn_pim_sync_process_sync_category_tree();
+            return [CONTROLLER_STATUS_OK, 'pim_sync.manage'];
+        } else {
+            // Просто отображение страницы синхронизации дерева категорий
+            fn_pim_sync_controller_sync_category_tree();
+        }
+        break;
+        
     case 'manage':
     default:
         fn_pim_sync_controller_manage();
@@ -114,6 +125,56 @@ function fn_pim_sync_controller_test_connection()
     Registry::get('view')->assign([
         'api_settings' => $api_settings,
         'recent_errors' => $recent_errors
+    ]);
+}
+
+/**
+ * Обработчик страницы синхронизации дерева категорий
+ */
+function fn_pim_sync_controller_sync_category_tree()
+{
+    fn_pim_sync_log('Отображение страницы синхронизации дерева категорий', 'info');
+    
+    // Получаем настройки
+    $settings = fn_pim_sync_get_settings();
+    
+    // Получаем доступные каталоги из PIM
+    $catalogs = [];
+    try {
+        $pim_client = fn_pim_sync_get_pim_client();
+        if ($pim_client) {
+            // Здесь нужно будет добавить метод для получения списка каталогов
+            // Пока используем предопределенный список
+            $catalogs = [
+                ['id' => '21', 'name' => 'Uroven.pro'],
+                ['id' => '22', 'name' => 'Другой каталог']
+            ];
+        }
+    } catch (Exception $e) {
+        fn_set_notification('E', __('error'), __('pim_sync.error_loading_catalogs') . ': ' . $e->getMessage());
+    }
+    
+    // Получаем список витрин
+    $storefronts = fn_pim_sync_get_available_storefronts();
+    
+    // Добавляем отладочную информацию
+    fn_pim_sync_log('Загружено каталогов: ' . count($catalogs), 'debug');
+    fn_pim_sync_log('Загружено витрин: ' . count($storefronts), 'debug');
+    
+    // Если витрины не загрузились, добавляем дефолтные
+    if (empty($storefronts)) {
+        $storefronts = [
+            ['company_id' => 2, 'name' => 'Уровень', 'email' => 'info@uroven.pro'],
+            ['company_id' => 4, 'name' => 'uroven.local', 'email' => '']
+        ];
+        fn_pim_sync_log('Используются дефолтные витрины', 'warning');
+    }
+    
+    Registry::get('view')->assign([
+        'catalogs' => $catalogs,
+        'storefronts' => $storefronts,
+        'default_catalog_id' => $settings['catalog_id'] ?: '21',
+        'default_company_id' => 2 // Уровень
     ]);
 }
 

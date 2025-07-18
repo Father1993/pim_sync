@@ -69,12 +69,12 @@ class CsCartApiClient extends BaseApiClient
     /**
      * Получает список продуктов из CS-Cart
      *
-     * @param string|null $scope Не используется в CS-Cart API
+     * @param string $catalogId Не используется в CS-Cart API (игнорируется)
      * @param array $params
      * @return array Список продуктов
      * @throws Exception
      */
-    public function getProducts(?string $scope = null, array $params = []): array
+    public function getProducts(string $catalogId, array $params = []): array
     {
         $endpoint = '/api/2.0/products';
         if (!empty($params)) {

@@ -6,9 +6,20 @@
  */
 
 return [
+    // Каталог ID 21 (тестовый каталог)
+    '21' => [
+        'company_id' => 2,      // Уровень
+        'storefront_id' => 1,
+        'name' => 'Тестовый каталог ID 21',
+        'description' => 'Тестовый каталог для продавца Уровень',
+        'auto_sync' => true,
+        'sync_products' => true,
+        'sync_categories' => true
+    ],
+    
     // Основные каталоги
     'master_catalog' => [
-        'company_id' => 0,      // Общие категории для всех
+        'company_id' => 2,      // Меняем с 0 на 2 для Уровень
         'storefront_id' => 1,   // Основная витрина
         'name' => 'Мастер каталог',
         'description' => 'Основной каталог с общими категориями',
@@ -48,14 +59,14 @@ return [
         'sync_categories' => true
     ],
     
-    // Настройки по умолчанию
+    // Конфигурация по умолчанию
     'default' => [
-        'company_id' => 0,
+        'company_id' => 2,      // Меняем с 0 на 2 для Уровень (по умолчанию)
         'storefront_id' => 1,
         'name' => 'Каталог по умолчанию',
-        'description' => 'Используется если не найден подходящий маппинг',
+        'description' => 'Каталог по умолчанию для неопределенных каталогов',
         'auto_sync' => false,
-        'sync_products' => false,
-        'sync_categories' => false
+        'sync_products' => true,
+        'sync_categories' => true
     ]
 ]; 

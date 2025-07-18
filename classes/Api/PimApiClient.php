@@ -19,6 +19,7 @@ class PimApiClient extends BaseApiClient
     private int $token_expires = 0;
     private string $login;
     private string $password;
+    private static $catalogs_cache = null; // Кэш для каталогов
     
     /**
      * PimApiClient constructor
@@ -63,60 +64,41 @@ class PimApiClient extends BaseApiClient
      */
     public function makeRequest(string $endpoint, string $method = 'GET', ?array $data = null, bool $use_auth = true): array
     {
-        // Проверяем необходимость авторизации
-        if ($use_auth && (!$this->token || time() >= $this->token_expires)) {
-            $this->logger?->log('Токен отсутствует или истек, запрашиваем новый', 'debug');
+        // Проверяем токен и аутентифицируемся при необходимости
+        if ($use_auth && ($this->token === null || time() >= $this->token_expires)) {
             $this->authenticate();
         }
         
-        // Если требуется аутентификация, добавляем токен в заголовки
-        $headers = $this->getHeaders();
-        if ($use_auth && $this->token) {
-            $headers[] = 'Authorization: Bearer ' . $this->token;
-            $this->logger?->log('Добавлен токен авторизации в запрос', 'debug');
-        }
-        $this->headers = $headers;
-        return parent::makeRequest($endpoint, $method, $data);
+        return parent::makeRequest($endpoint, $method, $data, $use_auth);
     }
     
     /**
-     * Авторизация и получение токена
+     * Аутентификация в PIM API
      *
-     * @throws Exception
-     * @return void
+     * @throws ApiAuthException
      */
     private function authenticate()
     {
         try {
-            $auth_data = [
+            $response = parent::makeRequest('/sign-in/', 'POST', [
                 'login' => $this->login,
                 'password' => $this->password,
                 'remember' => true
-            ];
+            ], false);
             
-            // Выполняем запрос без авторизации
-            $response = parent::makeRequest('/sign-in/', 'POST', $auth_data);
-
-            if ($response && isset($response['success']) && $response['success'] === true) {
-
-                if (!isset($response['data']['access']['token'])) {
-                    throw new ApiAuthException('PIM API authentication failed: token not found in response');
-                }
-                
-                $this->token = $response['data']['access']['token'];
-                $this->token_expires = time() + 3300;
-                $this->logger?->log('Успешная авторизация в PIM API', 'info');
-                $this->logger?->log('Токен получен, срок действия: ' . date('Y-m-d H:i:s', $this->token_expires), 'debug');
-            } else {
-                $error_message = 'PIM API authentication failed';
-                if (isset($response['message'])) {
-                    $error_message .= ': ' . $response['message'];
-                }
-                throw new ApiAuthException($error_message, 0, $response);
+            if (!isset($response['success']) || !$response['success'] || !isset($response['data']['access']['token'])) {
+                throw new ApiAuthException('Ошибка авторизации: неверный ответ от API');
             }
+            
+            $this->token = $response['data']['access']['token'];
+            $this->token_expires = time() + 3600; // 1 час
+            
+            $this->logger?->log('Успешная авторизация в PIM API', 'info');
+            $this->logger?->log('Токен получен, срок действия: ' . date('Y-m-d H:i:s', $this->token_expires), 'debug');
+            
         } catch (Exception $e) {
             $this->logger?->log('Ошибка авторизации в PIM API: ' . $e->getMessage(), 'error');
-            throw $e;
+            throw new ApiAuthException('Ошибка авторизации: ' . $e->getMessage());
         }
     }
     
@@ -129,14 +111,43 @@ class PimApiClient extends BaseApiClient
      */
     public function getCatalogs(array $params = []): array
     {
+        // Проверяем кэш
+        if (self::$catalogs_cache !== null) {
+            $this->logger?->log('Использование кэшированных каталогов', 'debug');
+            return self::$catalogs_cache;
+        }
+        
         $endpoint = '/catalog';
         if (!empty($params)) {
             $endpoint .= '?' . http_build_query($params);
         }
         $response = $this->makeRequest($endpoint, 'GET');
         if (isset($response['data']) && $response['success'] === true) {
+            self::$catalogs_cache = $response['data']; // Кэшируем результат
             return $response['data'];
         }
+        
+        self::$catalogs_cache = $response; // Кэшируем результат
+        return $response;
+    }
+
+    /**
+     * Получает конкретный каталог по ID
+     *
+     * @param string $catalogId ID каталога
+     * @return array Данные каталога
+     * @throws Exception
+     */
+    public function getCatalogById(string $catalogId): array
+    {
+        $endpoint = '/catalog/' . $catalogId;
+        
+        $response = $this->makeRequest($endpoint, 'GET');
+        
+        if (isset($response['data']) && $response['success'] === true) {
+            return $response['data'];
+        }
+        
         return $response;
     }
 
@@ -154,50 +165,41 @@ class PimApiClient extends BaseApiClient
             throw new ApiAuthException('Catalog ID is required for PIM API', 400);
         }
         
-        // Сначала получаем все каталоги
-        $catalogs = $this->getCatalogs($params);
-        
-        // Находим нужный каталог по ID
-        $targetCatalog = null;
-        foreach ($catalogs as $catalog) {
-            if ($catalog['id'] == $scope) {
-                $targetCatalog = $catalog;
-                break;
-            }
-        }
-        
-        if ($targetCatalog === null) {
-            throw new Exception("Каталог с ID {$scope} не найден");
-        }
+        // Получаем конкретный каталог по ID
+        $catalog = $this->getCatalogById($scope);
         
         // Возвращаем найденный каталог как массив (для совместимости с существующим кодом)
-        return [$targetCatalog];
+        return [$catalog];
     }
 
     
     /**
-     * Получает список продуктов из PIM
+     * Получает товары из указанного каталога
      *
-     * @param string|null $scope ID каталога
-     * @param array $params
-     * @return array Список продуктов
+     * @param string $catalogId ID каталога
+     * @param array $params Параметры запроса
+     * @return array Список товаров
      * @throws Exception
      */
-    public function getProducts(?string $scope = null, array $params = []): array
+    public function getProducts(string $catalogId, array $params = []): array
     {
-        if ($scope === null) {
-            throw new ApiAuthException('Catalog ID is required for PIM API', 400);
-        }
+        // Используем scroll API для получения товаров
         $endpoint = '/product/scroll';
-        $params['catalogId'] = $scope;
-        if (!empty($params)) {
-            $endpoint .= '?' . http_build_query($params);
-        }
-        $response = $this->makeRequest($endpoint, 'GET');
-        if (isset($response['data']) && isset($response['data']['productElasticDtos']) && $response['success'] === true) {
+        $queryParams = [
+            'catalogId' => $catalogId,
+            'size' => $params['limit'] ?? 50,
+            'page' => $params['page'] ?? 0
+        ];
+        
+        $url = $endpoint . '?' . http_build_query($queryParams);
+        
+        $response = $this->makeRequest($url, 'GET');
+        
+        if (isset($response['data']['productElasticDtos']) && $response['success'] === true) {
             return $response['data']['productElasticDtos'];
         }
-        return isset($response['data']) ? $response['data'] : $response;
+        
+        return [];
     }
 
     /**
@@ -224,33 +226,32 @@ class PimApiClient extends BaseApiClient
     /**
      * Получает измененные продукты за указанный период
      *
-     * @param string $catalogId
+     * @param string $catalogId ID каталога
      * @param int $days Количество дней для поиска изменений
-     * @param array $params 
+     * @param array $params Дополнительные параметры
      * @return array Список измененных продуктов
      * @throws Exception
      */
     public function getChangedProducts(string $catalogId, int $days = 1, array $params = []): array
     {
-        // Базовые параметры для запроса
-        $scrollParams = [
-            'catalogId' => $catalogId,
-            'day' => $days
-        ];
-        $mergedParams = array_merge($scrollParams, $params);
-        $endpoint = '/product/scroll';        
-        if (!empty($mergedParams)) {
-            $endpoint .= '?' . http_build_query($mergedParams);
-        }        
+        $endpoint = '/product/scroll';
+        $params['catalogId'] = $catalogId;
+        $params['days'] = $days;
+        
+        if (!empty($params)) {
+            $endpoint .= '?' . http_build_query($params);
+        }
+        
         $response = $this->makeRequest($endpoint, 'GET');
         if (isset($response['data']) && isset($response['data']['productElasticDtos']) && $response['success'] === true) {
             return $response['data']['productElasticDtos'];
         }
+        
         return isset($response['data']) ? $response['data'] : $response;
     }
     
     /**
-     * Получает заголовки для запросов
+     * Получает заголовки для HTTP запросов
      *
      * @return array
      */
@@ -258,9 +259,9 @@ class PimApiClient extends BaseApiClient
     {
         $headers = parent::getHeaders();
         
-        // Добавляем специфичные заголовки для PIM API
-        if (defined('PIM_SYNC_API_VERSION')) {
-            $headers[] = 'X-PIM-Version: ' . PIM_SYNC_API_VERSION;
+        if ($this->token !== null) {
+            $headers[] = 'Authorization: Bearer ' . $this->token;
+            $this->logger?->log('Добавлен токен авторизации в запрос', 'debug');
         }
         
         return $headers;

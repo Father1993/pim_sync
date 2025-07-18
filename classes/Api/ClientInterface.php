@@ -44,9 +44,9 @@ interface ClientInterface
     /**
      * Получает список продуктов
      * 
-     * @param string|null $scope Область данных (каталог для PIM, игнорируется в CS-Cart)
+     * @param string $catalogId ID каталога (обязательный для PIM, игнорируется в CS-Cart)
      * @param array $params Дополнительные параметры запроса
      * @return array Список продуктов
      */
-    public function getProducts(?string $scope = null, array $params = []): array;
+    public function getProducts(string $catalogId, array $params = []): array;
 }
