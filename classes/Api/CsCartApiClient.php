@@ -59,7 +59,7 @@ class CsCartApiClient extends BaseApiClient
      */
     public function getCategories(?string $scope = null, array $params = []): array
     {
-        $endpoint = '/api/2.0/categories/';
+        $endpoint = '/api/2.0/categories';
         if (!empty($params)) {
             $endpoint .= '?' . http_build_query($params);
         }
@@ -76,11 +76,27 @@ class CsCartApiClient extends BaseApiClient
      */
     public function getProducts(?string $scope = null, array $params = []): array
     {
-        $endpoint = '/api/2.0/products/';
+        $endpoint = '/api/2.0/products';
         if (!empty($params)) {
             $endpoint .= '?' . http_build_query($params);
         }
         return $this->makeRequest($endpoint);
+    }
+
+    /**
+     * Простой GET запрос для совместимости
+     *
+     * @param string $endpoint
+     * @param array $params
+     * @return array
+     * @throws Exception
+     */
+    public function get(string $endpoint, array $params = []): array
+    {
+        if (!empty($params)) {
+            $endpoint .= '?' . http_build_query($params);
+        }
+        return $this->makeRequest($endpoint, 'GET');
     }
 
     /**
@@ -100,7 +116,7 @@ class CsCartApiClient extends BaseApiClient
         } else {
             // Создание новой категории
             $this->logger?->log("Создание новой категории в CS-Cart: {$category['category']}", 'debug');
-            return $this->makeRequest('/api/2.0/categories/', 'POST', $category);
+            return $this->makeRequest('/api/2.0/categories', 'POST', $category);
         }
     }
 
@@ -119,7 +135,7 @@ class CsCartApiClient extends BaseApiClient
             return $this->makeRequest('/api/2.0/products/' . $productId, 'PUT', $product);
         } else {
             // Создание нового продукта
-            return $this->makeRequest('/api/2.0/products/', 'POST', $product);
+            return $this->makeRequest('/api/2.0/products', 'POST', $product);
         }
     }
     
